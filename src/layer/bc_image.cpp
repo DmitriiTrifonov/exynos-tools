@@ -33,6 +33,8 @@ Variant variant_of(VkFormat f) {
         case VK_FORMAT_BC5_SNORM_BLOCK: return {3, 16};
         case VK_FORMAT_BC7_UNORM_BLOCK:
         case VK_FORMAT_BC7_SRGB_BLOCK: return {4, 16};
+        case VK_FORMAT_BC6H_UFLOAT_BLOCK: return {5, 16};
+        case VK_FORMAT_BC6H_SFLOAT_BLOCK: return {6, 16};
         default: return {-1, 0};
     }
 }
@@ -47,8 +49,10 @@ const SpvBlob kSpv[] = {
     {spv::bc5_unorm, sizeof(spv::bc5_unorm)},
     {spv::bc5_snorm, sizeof(spv::bc5_snorm)},
     {spv::bc7, sizeof(spv::bc7)},
+    {spv::bc6h_unsigned, sizeof(spv::bc6h_unsigned)},
+    {spv::bc6h_signed, sizeof(spv::bc6h_signed)},
 };
-constexpr int kVariantCount = 5;
+constexpr int kVariantCount = 7;
 
 struct PushBlock {
     uint32_t word_base, row_pitch, slice_pitch;

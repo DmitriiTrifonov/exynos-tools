@@ -15,5 +15,6 @@
 | GameNative release notes / READMEs | which stack GameNative builds on | README level |
 | bcdec (iOrange), third_party/bcdec/bcdec.h | CPU reference decoder for tests only; MIT or Unlicense (dual) | vendored, license text kept in the file |
 | Khronos Data Format Specification / Vulkan spec, BC4/BC5 sections | decode shader (src/layer/shaders/bc45.comp) | public spec |
-| bcdec BC7 partition tables, via scripts/gen-bc7-tables.py -> src/layer/shaders/bc7_tables.glsl | tables in the BC7 decode shader; MIT or Unlicense (bcdec), generated file carries a pointer to its source | permissive, attribution kept here and in the generated header |
+| bcdec BC7 partition tables, via scripts/gen-bc-tables.py -> src/layer/shaders/bc7_tables.glsl, bc6h_tables.glsl | tables in the BC7 decode shader; MIT or Unlicense (bcdec), generated file carries a pointer to its source | permissive, attribution kept here and in the generated header |
 | Microsoft BC7 format reference (learn.microsoft.com, direct3d11/bc7-format) | mode table for src/layer/shaders/bc7.comp (as cited by bcdec) | public docs |
+| Microsoft BC6H format reference (learn.microsoft.com, direct3d11/bc6h-format) | mode layouts as encoded in bcdec; src/layer/shaders/bc6h.comp | public docs |

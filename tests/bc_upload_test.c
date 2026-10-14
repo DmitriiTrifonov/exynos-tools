@@ -1,4 +1,4 @@
-// bc_upload_test: uploads random BC4/BC5/BC7 data to emulated images through vkCmdCopyBufferToImage,
+// bc_upload_test: uploads random BC4/BC5/BC7/BC6H data to emulated images through vkCmdCopyBufferToImage,
 // reads the decoded texels back and compares them with a reference decoder (bcdec, run on the CPU).
 // Run with the layer embedded and emulation on, e.g.
 //   EXYNOS_TOOLS_BC=emulate EXYNOS_PROBE_LAYER=build/libVkLayer_exynos_tools.so build/bc_upload_test
@@ -15,19 +15,23 @@
 typedef struct {
     VkFormat format;
     const char* name;
-    int channels;  // texel channels of the backing image: 1 = BC4, 2 = BC5, 4 = BC7
+    int channels;  // texel channels of the backing image (BC4 1, BC5 2, BC7 and BC6H 4)
     int is_signed;
+    int texel_bytes;  // bytes per texel of the backing image
     VkFormat backing;  // what the emulated image is stored as
 } Fmt;
 
 static const Fmt kFmts[] = {
-    {VK_FORMAT_BC4_UNORM_BLOCK, "BC4_UNORM", 1, 0, VK_FORMAT_R8_UNORM},
-    {VK_FORMAT_BC4_SNORM_BLOCK, "BC4_SNORM", 1, 1, VK_FORMAT_R8_SNORM},
-    {VK_FORMAT_BC5_UNORM_BLOCK, "BC5_UNORM", 2, 0, VK_FORMAT_R8G8_UNORM},
-    {VK_FORMAT_BC5_SNORM_BLOCK, "BC5_SNORM", 2, 1, VK_FORMAT_R8G8_SNORM},
-    {VK_FORMAT_BC7_UNORM_BLOCK, "BC7_UNORM", 4, 0, VK_FORMAT_R8G8B8A8_UNORM},
-    {VK_FORMAT_BC7_SRGB_BLOCK, "BC7_SRGB", 4, 0, VK_FORMAT_R8G8B8A8_UNORM},
+    {VK_FORMAT_BC4_UNORM_BLOCK, "BC4_UNORM", 1, 0, 1, VK_FORMAT_R8_UNORM},
+    {VK_FORMAT_BC4_SNORM_BLOCK, "BC4_SNORM", 1, 1, 1, VK_FORMAT_R8_SNORM},
+    {VK_FORMAT_BC5_UNORM_BLOCK, "BC5_UNORM", 2, 0, 2, VK_FORMAT_R8G8_UNORM},
+    {VK_FORMAT_BC5_SNORM_BLOCK, "BC5_SNORM", 2, 1, 2, VK_FORMAT_R8G8_SNORM},
+    {VK_FORMAT_BC7_UNORM_BLOCK, "BC7_UNORM", 4, 0, 4, VK_FORMAT_R8G8B8A8_UNORM},
+    {VK_FORMAT_BC7_SRGB_BLOCK, "BC7_SRGB", 4, 0, 4, VK_FORMAT_R8G8B8A8_UNORM},
+    {VK_FORMAT_BC6H_UFLOAT_BLOCK, "BC6H_UFLOAT", 4, 0, 8, VK_FORMAT_R16G16B16A16_SFLOAT},
+    {VK_FORMAT_BC6H_SFLOAT_BLOCK, "BC6H_SFLOAT", 4, 1, 8, VK_FORMAT_R16G16B16A16_SFLOAT},
 };
+#define IS_BC6H(f) ((f)->texel_bytes == 8)
 
 typedef struct { uint32_t w, h, mips, layers; } Case;
 static const Case kCases[] = {
@@ -53,7 +57,7 @@ static int convert(float f, int is_signed) {
 
 static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
     PFN_vkCreateImage CreateImage = H_DEV(c->device, vkCreateImage);
-    uint32_t bb = f->channels == 1 ? 8 : 16;  // block bytes: BC4 8, BC5/BC7 16
+    uint32_t bb = f->channels == 1 ? 8 : 16;  // block bytes: BC4 8, BC5/BC7/BC6H 16
 
     // Layout of the staging data: per mip, one slice per layer, tightly packed.
     VkDeviceSize src_off[16], dst_off[16], src_total = 0, dst_total = 0;
@@ -62,7 +66,7 @@ static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
         src_off[m] = src_total;
         src_total += (VkDeviceSize)div4(mw) * div4(mh) * bb * cs->layers;
         dst_off[m] = dst_total;
-        dst_total += (VkDeviceSize)mw * mh * f->channels * cs->layers;
+        dst_total += (VkDeviceSize)mw * mh * f->texel_bytes * cs->layers;
         dst_total = (dst_total + 3) & ~3ull;
     }
 
@@ -75,7 +79,17 @@ static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
     uint8_t* src;
     H_CHECK(H_DEV(c->device, vkMapMemory)(c->device, smem, 0, VK_WHOLE_SIZE, 0, (void**)&src));
     for (VkDeviceSize i = 0; i < src_total; i++) src[i] = (uint8_t)rnd();
-    if (f->channels == 4) {
+    if (IS_BC6H(f)) {
+        // Spread the BC6H modes evenly: the 14 valid mode codes and the 4 reserved ones.
+        static const uint8_t codes[18][2] = {{0x00, 3}, {0x01, 3}, {0x02, 31}, {0x06, 31}, {0x0a, 31}, {0x0e, 31},
+                                             {0x12, 31}, {0x16, 31}, {0x1a, 31}, {0x1e, 31}, {0x03, 31}, {0x07, 31},
+                                             {0x0b, 31}, {0x0f, 31}, {0x13, 31}, {0x17, 31}, {0x1b, 31}, {0x1f, 31}};
+        for (VkDeviceSize blk = 0; blk < src_total / 16; blk++) {
+            uint8_t* p = src + blk * 16;
+            const uint8_t* c = codes[blk % 18];
+            p[0] = (uint8_t)((p[0] & ~c[1]) | c[0]);
+        }
+    } else if (f->channels == 4) {
         // Spread the BC7 modes evenly (mode m = lowest set bit of byte 0; 8 = reserved, decodes to 0).
         for (VkDeviceSize blk = 0; blk < src_total / 16; blk++) {
             uint32_t m = (uint32_t)(blk % 9);
@@ -168,19 +182,36 @@ static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
         uint32_t bx = div4(mw), by = div4(mh);
         for (uint32_t l = 0; l < cs->layers; l++) {
             const uint8_t* blocks = src + src_off[m] + (VkDeviceSize)l * bx * by * bb;
-            const uint8_t* got = out + dst_off[m] + (VkDeviceSize)l * mw * mh * f->channels;
+            const uint8_t* got = out + dst_off[m] + (VkDeviceSize)l * mw * mh * f->texel_bytes;
             for (uint32_t y = 0; y < by; y++)
                 for (uint32_t x = 0; x < bx; x++) {
                     float ref[16 * 2];
                     uint8_t ref7[16 * 4];
+                    uint16_t ref6[16 * 3];
                     const uint8_t* blk = blocks + ((VkDeviceSize)y * bx + x) * bb;
                     if (f->channels == 1) bcdec_bc4_float(blk, ref, 4, f->is_signed);
                     else if (f->channels == 2) bcdec_bc5_float(blk, ref, 4 * 2, f->is_signed);
+                    else if (IS_BC6H(f)) bcdec_bc6h_half(blk, ref6, 4 * 3, f->is_signed);
                     else bcdec_bc7(blk, ref7, 4 * 4);
                     for (int j = 0; j < 4; j++)
                         for (int i = 0; i < 4; i++) {
                             uint32_t px = x * 4 + i, py = y * 4 + j;
                             if (px >= mw || py >= mh) continue;
+                            if (IS_BC6H(f)) {
+                                const uint16_t* gp = (const uint16_t*)(got + ((VkDeviceSize)py * mw + px) * 8);
+                                for (int ch = 0; ch < 4; ch++) {
+                                    int want = ch < 3 ? ref6[(j * 4 + i) * 3 + ch] : 0x3c00;  // alpha = 1.0
+                                    int v = gp[ch];
+                                    int diff = v == want ? 0 : 999;  // half bit patterns must match exactly
+                                    if (diff > maxdiff) maxdiff = diff;
+                                    if (diff && bad < 4)
+                                        printf("  mismatch mip %u layer %u texel (%u,%u) ch %d: got 0x%04x want 0x%04x, block %02x %02x ...\n",
+                                               m, l, px, py, ch, v, want, blk[0], blk[1]);
+                                    if (diff) bad++;
+                                    total++;
+                                }
+                                continue;
+                            }
                             for (int ch = 0; ch < f->channels; ch++) {
                                 int want = f->channels == 4 ? ref7[(j * 4 + i) * 4 + ch]
                                                             : convert(ref[(j * 4 + i) * f->channels + ch], f->is_signed);

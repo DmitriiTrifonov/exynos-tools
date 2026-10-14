@@ -43,8 +43,8 @@ off (default), advertise / advertise-force (phase 4, reporting only), emulate / 
 decoding for the formats implemented so far; `-force` pretends the driver has no BC4-BC7, for host tests).
 
 ## Sub-phases
-5a  image/view/buffer substitution and tracking
-5b  BC4/BC5 compute decode + compute-state restore + test against a reference decoder
-5c  BC7
-5d  BC6H
-5e  remaining copy forms, 3D images, robustness, performance
+5a  (done) image/view/buffer substitution and tracking
+5b  (done) BC4/BC5 compute decode + compute-state restore + test against a reference decoder
+5c  (done) BC7
+5d  (done) BC6H
+5e  remaining copy forms, 3D images, robustness, performance, real-game testing

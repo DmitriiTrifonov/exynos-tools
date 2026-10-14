@@ -15,6 +15,8 @@ VARIANTS = {
     "bc5_unorm": ("bc45.comp", ["BLOCK_WORDS=4", "CHANNELS=2", "SNORM=0", "FMT=rg8"]),
     "bc5_snorm": ("bc45.comp", ["BLOCK_WORDS=4", "CHANNELS=2", "SNORM=1", "FMT=rg8_snorm"]),
     "bc7": ("bc7.comp", []),
+    "bc6h_unsigned": ("bc6h.comp", ["SIGNED=0"]),
+    "bc6h_signed": ("bc6h.comp", ["SIGNED=1"]),
 }
 
 def compile_one(src, defines):

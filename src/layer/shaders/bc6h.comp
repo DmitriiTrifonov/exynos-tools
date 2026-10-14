@@ -1,0 +1,178 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// BC6H block decoder (HDR). One invocation decodes one 4x4 block of one array layer into RGBA16F.
+// Compile with -DSIGNED=0 (BC6H_UFLOAT) or -DSIGNED=1 (BC6H_SFLOAT).
+// Written from the BC6H mode definitions; the header bit-field layouts and the partition table are
+// generated from bcdec (MIT or Unlicense), see scripts/gen-bc-tables.py.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer Blocks { uint data[]; };
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray dst;
+
+layout(push_constant) uniform PC {
+    uint word_base;
+    uint row_pitch;
+    uint slice_pitch;
+    uint off_x, off_y;
+    uint ext_x, ext_y;
+    uint mip_x, mip_y;
+} pc;
+
+#include "bc6h_tables.glsl"
+
+const int W3[8] = int[8](0, 9, 18, 27, 37, 46, 55, 64);
+const int W4[16] = int[16](0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64);
+
+uvec4 blk;
+uint bpos;
+
+uint rd(uint n) {
+    if (n == 0u) return 0u;
+    uint w = bpos >> 5u;
+    uint o = bpos & 31u;
+    uint v = blk[w] >> o;
+    if (o + n > 32u) v |= blk[w + 1u] << (32u - o);
+    bpos += n;
+    return v & ((1u << n) - 1u);
+}
+
+uint reverse_bits_n(uint v, uint n) {
+    uint r = 0u;
+    for (uint i = 0u; i < n; i++) {
+        r = (r << 1u) | (v & 1u);
+        v >>= 1u;
+    }
+    return r;
+}
+
+int extend_sign(int val, int bits) { return (val << (32 - bits)) >> (32 - bits); }
+
+int transform_inverse(int val, int a0, int bits) {
+    val = (val + a0) & ((1 << bits) - 1);
+#if SIGNED
+    val = extend_sign(val, bits);
+#endif
+    return val;
+}
+
+int unquantize(int val, int bits) {
+#if !SIGNED
+    if (bits >= 15) return val;
+    if (val == 0) return 0;
+    if (val == ((1 << bits) - 1)) return 0xFFFF;
+    return ((val << 16) + 0x8000) >> bits;
+#else
+    if (bits >= 16) return val;
+    bool neg = val < 0;
+    if (neg) val = -val;
+    int unq;
+    if (val == 0) unq = 0;
+    else if (val >= ((1 << (bits - 1)) - 1)) unq = 0x7FFF;
+    else unq = ((val << 15) + 0x4000) >> (bits - 1);
+    return neg ? -unq : unq;
+#endif
+}
+
+int interpolate(int a, int b, int w) { return (a * (64 - w) + b * w + 32) >> 6; }
+
+// Result as the bit pattern of a half float.
+uint finish_unquantize(int val) {
+#if !SIGNED
+    return uint((val * 31) >> 6);
+#else
+    val = (val < 0) ? -(((-val) * 31) >> 5) : (val * 31) >> 5;
+    uint s = 0u;
+    if (val < 0) {
+        s = 0x8000u;
+        val = -val;
+    }
+    return s | uint(val);
+#endif
+}
+
+float half_bits_to_float(uint h) { return unpackHalf2x16(h).x; }
+
+void decode_block(uvec4 block, out vec4 px[16]) {
+    blk = block;
+    bpos = 0u;
+
+    uint code = rd(2u);
+    if (code > 1u) code |= rd(3u) << 2u;
+    uint mode = code < 2u ? code : BC6H_MODE_OF_CODE[code];
+    if (mode == 255u) {  // reserved: all zero, alpha 1
+        for (uint t = 0u; t < 16u; t++) px[t] = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    ivec4 ep[3];  // [component][endpoint]: r, g, b
+    for (uint c = 0u; c < 3u; c++) ep[c] = ivec4(0);
+    uint part = 0u;
+    uint nf = BC6H_NFIELDS[mode];
+    for (uint f = 0u; f < nf; f++) {
+        uint fld = BC6H_FIELDS[mode * 32u + f];
+        uint comp = fld & 3u;
+        uint idx = (fld >> 2u) & 3u;
+        uint nb = (fld >> 4u) & 15u;
+        uint sh = (fld >> 8u) & 15u;
+        uint v = rd(nb);
+        if (((fld >> 12u) & 1u) != 0u) v = reverse_bits_n(v, nb);
+        if (comp == 3u) part = v;
+        else ep[comp][idx] |= int(v << sh);
+    }
+
+    bool two = mode < 10u;
+    uint nep = two ? 4u : 2u;
+    int bits0 = BC6H_BITS_W[mode];
+    int bitsd[3] = int[3](BC6H_BITS_DR[mode], BC6H_BITS_DG[mode], BC6H_BITS_DB[mode]);
+    bool no_delta = (mode == 9u || mode == 10u);
+
+#if SIGNED
+    for (uint c = 0u; c < 3u; c++) ep[c][0] = extend_sign(ep[c][0], bits0);
+#endif
+    if (!no_delta || (SIGNED != 0)) {
+        for (uint i = 1u; i < nep; i++)
+            for (uint c = 0u; c < 3u; c++) ep[c][i] = extend_sign(ep[c][i], bitsd[c]);
+    }
+    if (!no_delta) {
+        for (uint i = 1u; i < nep; i++)
+            for (uint c = 0u; c < 3u; c++) ep[c][i] = transform_inverse(ep[c][i], ep[c][0], bits0);
+    }
+    for (uint i = 0u; i < nep; i++)
+        for (uint c = 0u; c < 3u; c++) ep[c][i] = unquantize(ep[c][i], bits0);
+
+    uint ibits = two ? 3u : 4u;
+    for (uint t = 0u; t < 16u; t++) {
+        uint s = 0u;
+        bool anchor = (t == 0u);
+        if (two) {
+            s = (BC6H_PART[part] >> t) & 1u;
+            anchor = anchor || (t == BC6H_ANCHOR[part]);
+        }
+        uint idx = rd(anchor ? ibits - 1u : ibits);
+        int w = two ? W3[idx] : W4[idx];
+        uint e = s * 2u;
+        vec3 rgb;
+        for (uint c = 0u; c < 3u; c++)
+            rgb[c] = half_bits_to_float(finish_unquantize(interpolate(ep[c][e], ep[c][e + 1u], w)));
+        px[t] = vec4(rgb, 1.0);
+    }
+}
+
+void main() {
+    uvec3 g = gl_GlobalInvocationID;
+    uvec2 blocks = (uvec2(pc.ext_x, pc.ext_y) + 3u) / 4u;
+    if (g.x >= blocks.x || g.y >= blocks.y) return;
+
+    uint base = pc.word_base + (g.z * pc.slice_pitch + g.y * pc.row_pitch + g.x) * 4u;
+    uvec4 block = uvec4(data[base], data[base + 1u], data[base + 2u], data[base + 3u]);
+    vec4 px[16];
+    decode_block(block, px);
+
+    for (uint t = 0u; t < 16u; t++) {
+        uint x = pc.off_x + g.x * 4u + (t & 3u);
+        uint y = pc.off_y + g.y * 4u + (t >> 2u);
+        if (x >= pc.off_x + pc.ext_x || y >= pc.off_y + pc.ext_y || x >= pc.mip_x || y >= pc.mip_y) continue;
+        imageStore(dst, ivec3(int(x), int(y), int(g.z)), px[t]);
+    }
+}

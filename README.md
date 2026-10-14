@@ -5,14 +5,15 @@ what the driver lacks (starting with BCn texture compression), so that Windows-g
 translation stacks (DXVK, vkd3d-proton under Winlator/GameNative-style launchers) can run
 on Exynos devices. First target: Galaxy Z Flip 7 (Exynos 2500, Xclipse 950).
 
-Status: phase 5 in progress. By default the layer is a pure pass-through. `EXYNOS_TOOLS_BC` selects:
+Status: phase 5 (BCn emulation) works for all BC formats; hardening and performance are next. By default the layer is a pure pass-through. `EXYNOS_TOOLS_BC` selects:
 
 - `off` (default): nothing changes.
 - `advertise` / `advertise-force`: only report BC4/BC5/BC6H/BC7 (and `textureCompressionBC`) as
   supported; for testing the reporting.
-- `emulate`: really emulate. BC4, BC5 (UNORM/SNORM) and BC7 (UNORM/SRGB) work: images are backed by R8/R8G8/RGBA8 images and
-  decoded by a compute shader when data is uploaded with `vkCmdCopyBufferToImage`. BC6H is
-  not implemented yet, so `textureCompressionBC` stays false until they are.
+- `emulate`: really emulate. BC4, BC5 (UNORM/SNORM), BC6H (UFLOAT/SFLOAT) and BC7 (UNORM/SRGB) work:
+  images are backed by R8/R8G8/RGBA8/RGBA16F images and decoded by a compute shader when data is
+  uploaded with `vkCmdCopyBufferToImage`. BC1-BC3 stay native. When all of BC1-BC7 are available,
+  `textureCompressionBC` is reported true.
 - `emulate-force`: like `emulate` but pretends the driver has none of BC4-BC7 (host testing).
 
 Emulated BC images support sampling and upload only (no readback, copies out of them or storage use). See [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -33,7 +34,7 @@ and diffs what the application sees. The layer logs to stderr (logcat on Android
 `scripts/check-advertise.sh build advertise` asserts that the advertised capabilities are
 consistent (use `advertise-force` on drivers that already have BC).
 
-`build/bc_upload_test` uploads random BC4/BC5/BC7 data through the layer and compares the decoded
+`build/bc_upload_test` uploads random BC4/BC5/BC6H/BC7 data through the layer and compares the decoded
 result with a reference decoder:
 
     EXYNOS_TOOLS_BC=emulate EXYNOS_PROBE_LAYER=$PWD/build/libVkLayer_exynos_tools.so build/bc_upload_test
