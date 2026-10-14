@@ -1,0 +1,54 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host:
+    # Builds the layer for the CI machine and checks it is a transparent pass-through
+    # on a software Vulkan driver (lavapipe).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libvulkan-dev vulkan-tools mesa-vulkan-drivers
+      - uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/Vulkan-Headers
+          ref: v1.3.290
+          path: vulkan-headers
+      - run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DEXYNOS_VULKAN_HEADERS_PATH=$PWD/vulkan-headers/include
+          cmake --build build
+      - run: |
+          export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
+          scripts/run-probe.sh build | tee probe.log
+          grep -q IDENTICAL probe.log
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/Vulkan-Headers
+          ref: v1.3.290
+          path: vulkan-headers
+      - name: Build for arm64-v8a
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
+          cmake -S . -B build-android -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+            -DEXYNOS_VULKAN_HEADERS_PATH=$PWD/vulkan-headers/include
+          cmake --build build-android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exynos-tools-android-arm64
+          path: |
+            build-android/libVkLayer_exynos_tools.so
+            build-android/vk_probe
+            build-android/VkLayer_exynos_tools.json
