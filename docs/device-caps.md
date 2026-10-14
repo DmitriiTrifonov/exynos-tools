@@ -27,7 +27,7 @@ the Android side.
 
 ## Findings
 Source: `vulkaninfo --summary` from Termux on the device (docs/data/summary.txt), 2026-10-14.
-One UI version and build number: not recorded yet.
+Device: SM-F766B (Galaxy Z Flip 7), Android 16 (SDK 36), One UI 8.0.5, build BP4A.251205.006.F766BXXSCBZH3.
 
 - Device: Samsung Xclipse 950, integrated GPU, vendorID 0x144d, deviceID 0x3600200
 - Driver: Samsung Proprietary (DRIVER_ID_SAMSUNG_PROPRIETARY), version 24.0.555, git f23b0cfde
@@ -76,3 +76,11 @@ Columns: optimalTilingFeatures / linearTilingFeatures / bufferFeatures.
   R16G16B16A16_SFLOAT 0xdd83; R16G16B16A16_UNORM 0xcd83 (one bit fewer than SFLOAT).
 - With and without our layer the app-visible output was identical, but see the open
   question: it is not proven that the layer was loaded (empty VK_LOADER_DEBUG output).
+
+## Layer on the real device (2026-10-14)
+- Loader mode (VK_INSTANCE_LAYERS) in Termux: the layer is NOT loaded (0 log lines). Termux's
+  libvulkan.so is a symlink to /system/lib64/libvulkan.so, i.e. the Android system loader, which
+  loads layers only from an app's own lib dir or the debug dir of debuggable apps.
+- Embedded mode (vk_probe dlopens the layer and builds the chain, EXYNOS_PROBE_LAYER=...):
+  works on Xclipse 950. Instance, 168 device extensions, features, 36 format queries, device,
+  queue, waitidle all pass through; app-visible output identical to the plain run.

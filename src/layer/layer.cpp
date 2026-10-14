@@ -38,14 +38,16 @@ bool log_enabled() {
 void logf(const char* fmt, ...) {
     if (!log_enabled()) return;
     va_list ap;
-    va_start(ap, fmt);
 #ifdef __ANDROID__
+    va_start(ap, fmt);
     __android_log_vprint(ANDROID_LOG_INFO, "exynos-tools", fmt, ap);
-#else
+    va_end(ap);
+#endif
+    // stderr as well, so the log is visible in a terminal (Termux) without logcat.
+    va_start(ap, fmt);
     std::fprintf(stderr, "[exynos-tools] ");
     std::vfprintf(stderr, fmt, ap);
     std::fprintf(stderr, "\n");
-#endif
     va_end(ap);
 }
 

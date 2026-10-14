@@ -47,7 +47,14 @@ C. As an ICD-style wrapper library that the launcher loads in place of `libvulka
 D. Standalone test harness (our own Android app with a bundled layer). Not a product, but
    the only fully controllable place to develop and test phases 3-6 on the Flip 7.
 
-## 5. Decision for phase 3
+## 4b. Result: embedded mode is the development path
+The Android system loader ignores VK_INSTANCE_LAYERS/VK_LAYER_PATH, so a layer cannot be put in
+front of an unmodified app from outside (verified in Termux on the Flip 7). `vk_probe` therefore
+has an embedded mode: it dlopens the layer, negotiates interface v2 and chains it above the
+system loader by hand. That is also the shape of integration option A/C (a launcher or the
+Vortek server calling the layer directly), and it works in Termux without an APK.
+
+## 5. Decision for phase 3 (superseded by 4b: Termux + embedded mode replaced the test APK)
 Develop and test against option D first: a small Android app that creates a Vulkan device,
 loads our layer from its own lib dir (allowed by Android rules), and runs BC upload tests.
 This does not depend on any launcher. Integration into Winlator/GameNative (A or C) comes

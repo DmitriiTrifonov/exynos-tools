@@ -30,7 +30,7 @@ configure_file(layer/VkLayer_exynos_tools.json
 find_library(VULKAN_LIB NAMES vulkan)
 if(VULKAN_LIB)
   add_executable(vk_probe tests/vk_probe.c)
-  target_link_libraries(vk_probe PRIVATE ${VULKAN_LIB})
+  target_link_libraries(vk_probe PRIVATE ${VULKAN_LIB} ${CMAKE_DL_LIBS})
 else()
   message(WARNING "libvulkan not found; vk_probe not built")
 endif()
