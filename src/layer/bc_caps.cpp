@@ -8,7 +8,12 @@ namespace exynos {
 BcMode bc_mode() {
     static const BcMode mode = [] {
         const char* v = std::getenv("EXYNOS_TOOLS_BC");
-        if (!v) return BcMode::Off;
+        if (!v) {
+            // Loaded as the "BCn layer" of a Winlator-style launcher (docs/LAUNCHERS.md): the launcher
+            // switches that layer on with ENABLE_BCN_COMPUTE=1 and knows nothing about our variables.
+            const char* e = std::getenv("ENABLE_BCN_COMPUTE");
+            return (e && std::strcmp(e, "1") == 0) ? BcMode::Emulate : BcMode::Off;
+        }
         if (std::strcmp(v, "advertise") == 0) return BcMode::Advertise;
         if (std::strcmp(v, "advertise-force") == 0) return BcMode::AdvertiseForce;
         if (std::strcmp(v, "emulate") == 0) return BcMode::Emulate;

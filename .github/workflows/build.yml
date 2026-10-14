@@ -48,6 +48,10 @@ jobs:
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 \
             -DEXYNOS_VULKAN_HEADERS_PATH=$PWD/vulkan-headers/include
           cmake --build build-android
+      - name: Package for Bannerlator's BCn layer slot
+        run: |
+          sudo apt-get install -y zstd
+          scripts/package-bannerlator.sh build-android/libVkLayer_exynos_tools.so build-android/leegao_bcn.tzst
       - uses: actions/upload-artifact@v4
         with:
           name: exynos-tools-android-arm64
@@ -57,3 +61,4 @@ jobs:
             build-android/bc_upload_test
             build-android/bc_bench
             build-android/VkLayer_exynos_tools.json
+            build-android/leegao_bcn.tzst

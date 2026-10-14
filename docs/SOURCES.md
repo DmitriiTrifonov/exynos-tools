@@ -18,3 +18,5 @@
 | bcdec BC7 partition tables, via scripts/gen-bc-tables.py -> src/layer/shaders/bc7_tables.glsl, bc6h_tables.glsl | tables in the BC7 decode shader; MIT or Unlicense (bcdec), generated file carries a pointer to its source | permissive, attribution kept here and in the generated header |
 | Microsoft BC7 format reference (learn.microsoft.com, direct3d11/bc7-format) | mode table for src/layer/shaders/bc7.comp (as cited by bcdec) | public docs |
 | Microsoft BC6H format reference (learn.microsoft.com, direct3d11/bc6h-format) | mode layouts as encoded in bcdec; src/layer/shaders/bc6h.comp | public docs |
+| Bannerlator docs/sources (README, graphics-wrappers-guide, WRAPPER_MANAGER_PLAN, XServerDisplayActivity, WrapperManager) and its extra_libs.tzst manifest | where a launcher loads a BCn layer from, file layout, enable variable (GPL-3.0 project; read for interface facts only, nothing copied) | public repo |
+| leegao/bcn_layer (MIT) | prior art; its manifest layout is the slot's contract. No code used. | public repo |

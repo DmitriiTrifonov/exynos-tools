@@ -19,6 +19,7 @@ add_library(VkLayer_exynos_tools SHARED src/layer/layer.cpp src/layer/bc_caps.cp
 target_compile_options(VkLayer_exynos_tools PRIVATE -Wall -Wextra)
 if(ANDROID)
   target_link_libraries(VkLayer_exynos_tools PRIVATE log)
+  target_link_options(VkLayer_exynos_tools PRIVATE -Wl,--strip-all)  # debug info is not needed on the phone
 endif()
 # Android loads layers named lib*.so from the app's lib dir; keep the standard name.
 set_target_properties(VkLayer_exynos_tools PROPERTIES OUTPUT_NAME "VkLayer_exynos_tools")
