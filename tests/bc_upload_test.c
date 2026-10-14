@@ -1,4 +1,4 @@
-// bc_upload_test: uploads random BC4/BC5 data to emulated images through vkCmdCopyBufferToImage,
+// bc_upload_test: uploads random BC4/BC5/BC7 data to emulated images through vkCmdCopyBufferToImage,
 // reads the decoded texels back and compares them with a reference decoder (bcdec, run on the CPU).
 // Run with the layer embedded and emulation on, e.g.
 //   EXYNOS_TOOLS_BC=emulate EXYNOS_PROBE_LAYER=build/libVkLayer_exynos_tools.so build/bc_upload_test
@@ -15,7 +15,7 @@
 typedef struct {
     VkFormat format;
     const char* name;
-    int channels;  // 1 = BC4, 2 = BC5
+    int channels;  // texel channels of the backing image: 1 = BC4, 2 = BC5, 4 = BC7
     int is_signed;
     VkFormat backing;  // what the emulated image is stored as
 } Fmt;
@@ -25,6 +25,8 @@ static const Fmt kFmts[] = {
     {VK_FORMAT_BC4_SNORM_BLOCK, "BC4_SNORM", 1, 1, VK_FORMAT_R8_SNORM},
     {VK_FORMAT_BC5_UNORM_BLOCK, "BC5_UNORM", 2, 0, VK_FORMAT_R8G8_UNORM},
     {VK_FORMAT_BC5_SNORM_BLOCK, "BC5_SNORM", 2, 1, VK_FORMAT_R8G8_SNORM},
+    {VK_FORMAT_BC7_UNORM_BLOCK, "BC7_UNORM", 4, 0, VK_FORMAT_R8G8B8A8_UNORM},
+    {VK_FORMAT_BC7_SRGB_BLOCK, "BC7_SRGB", 4, 0, VK_FORMAT_R8G8B8A8_UNORM},
 };
 
 typedef struct { uint32_t w, h, mips, layers; } Case;
@@ -51,7 +53,7 @@ static int convert(float f, int is_signed) {
 
 static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
     PFN_vkCreateImage CreateImage = H_DEV(c->device, vkCreateImage);
-    uint32_t bb = f->channels == 1 ? 8 : 16;
+    uint32_t bb = f->channels == 1 ? 8 : 16;  // block bytes: BC4 8, BC5/BC7 16
 
     // Layout of the staging data: per mip, one slice per layer, tightly packed.
     VkDeviceSize src_off[16], dst_off[16], src_total = 0, dst_total = 0;
@@ -73,6 +75,14 @@ static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
     uint8_t* src;
     H_CHECK(H_DEV(c->device, vkMapMemory)(c->device, smem, 0, VK_WHOLE_SIZE, 0, (void**)&src));
     for (VkDeviceSize i = 0; i < src_total; i++) src[i] = (uint8_t)rnd();
+    if (f->channels == 4) {
+        // Spread the BC7 modes evenly (mode m = lowest set bit of byte 0; 8 = reserved, decodes to 0).
+        for (VkDeviceSize blk = 0; blk < src_total / 16; blk++) {
+            uint32_t m = (uint32_t)(blk % 9);
+            uint8_t* p = src + blk * 16;
+            p[0] = m == 8 ? 0 : (uint8_t)((p[0] & ~((2u << m) - 1u)) | (1u << m));
+        }
+    }
 
     VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
                              .format = f->format, .extent = {cs->w, cs->h, 1}, .mipLevels = cs->mips,
@@ -92,6 +102,15 @@ static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
     VkDeviceMemory imem;
     H_CHECK(H_DEV(c->device, vkAllocateMemory)(c->device, &mai, NULL, &imem));
     H_CHECK(H_DEV(c->device, vkBindImageMemory)(c->device, img, imem, 0));
+
+    // A sampled view in the BC format itself (BC7_SRGB becomes an sRGB view of the UNORM backing image).
+    VkImageViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = img,
+                                 .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY, .format = f->format,
+                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, cs->mips, 0, cs->layers}};
+    VkImageView view;
+    VkResult vr = H_DEV(c->device, vkCreateImageView)(c->device, &vci, NULL, &view);
+    if (vr != VK_SUCCESS) { printf("FAIL %s: vkCreateImageView = %d\n", f->name, (int)vr); return 1; }
+    H_DEV(c->device, vkDestroyImageView)(c->device, view, NULL);
 
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = c->family};
     VkCommandPool pool;
@@ -153,15 +172,18 @@ static int run_case(HCtx* c, const Fmt* f, const Case* cs) {
             for (uint32_t y = 0; y < by; y++)
                 for (uint32_t x = 0; x < bx; x++) {
                     float ref[16 * 2];
+                    uint8_t ref7[16 * 4];
                     const uint8_t* blk = blocks + ((VkDeviceSize)y * bx + x) * bb;
                     if (f->channels == 1) bcdec_bc4_float(blk, ref, 4, f->is_signed);
-                    else bcdec_bc5_float(blk, ref, 4 * 2, f->is_signed);
+                    else if (f->channels == 2) bcdec_bc5_float(blk, ref, 4 * 2, f->is_signed);
+                    else bcdec_bc7(blk, ref7, 4 * 4);
                     for (int j = 0; j < 4; j++)
                         for (int i = 0; i < 4; i++) {
                             uint32_t px = x * 4 + i, py = y * 4 + j;
                             if (px >= mw || py >= mh) continue;
                             for (int ch = 0; ch < f->channels; ch++) {
-                                int want = convert(ref[(j * 4 + i) * f->channels + ch], f->is_signed);
+                                int want = f->channels == 4 ? ref7[(j * 4 + i) * 4 + ch]
+                                                            : convert(ref[(j * 4 + i) * f->channels + ch], f->is_signed);
                                 int v = got[((VkDeviceSize)py * mw + px) * f->channels + ch];
                                 if (f->is_signed) v = (int8_t)v;
                                 int diff = abs(v - want);

@@ -10,8 +10,8 @@ Status: phase 5 in progress. By default the layer is a pure pass-through. `EXYNO
 - `off` (default): nothing changes.
 - `advertise` / `advertise-force`: only report BC4/BC5/BC6H/BC7 (and `textureCompressionBC`) as
   supported; for testing the reporting.
-- `emulate`: really emulate. BC4 and BC5 (UNORM/SNORM) work: images are backed by R8/R8G8 images and
-  decoded by a compute shader when data is uploaded with `vkCmdCopyBufferToImage`. BC7 and BC6H are
+- `emulate`: really emulate. BC4, BC5 (UNORM/SNORM) and BC7 (UNORM/SRGB) work: images are backed by R8/R8G8/RGBA8 images and
+  decoded by a compute shader when data is uploaded with `vkCmdCopyBufferToImage`. BC6H is
   not implemented yet, so `textureCompressionBC` stays false until they are.
 - `emulate-force`: like `emulate` but pretends the driver has none of BC4-BC7 (host testing).
 
@@ -33,7 +33,7 @@ and diffs what the application sees. The layer logs to stderr (logcat on Android
 `scripts/check-advertise.sh build advertise` asserts that the advertised capabilities are
 consistent (use `advertise-force` on drivers that already have BC).
 
-`build/bc_upload_test` uploads random BC4/BC5 data through the layer and compares the decoded
+`build/bc_upload_test` uploads random BC4/BC5/BC7 data through the layer and compares the decoded
 result with a reference decoder:
 
     EXYNOS_TOOLS_BC=emulate EXYNOS_PROBE_LAYER=$PWD/build/libVkLayer_exynos_tools.so build/bc_upload_test

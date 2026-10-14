@@ -14,13 +14,14 @@ VARIANTS = {
     "bc4_snorm": ("bc45.comp", ["BLOCK_WORDS=2", "CHANNELS=1", "SNORM=1", "FMT=r8_snorm"]),
     "bc5_unorm": ("bc45.comp", ["BLOCK_WORDS=4", "CHANNELS=2", "SNORM=0", "FMT=rg8"]),
     "bc5_snorm": ("bc45.comp", ["BLOCK_WORDS=4", "CHANNELS=2", "SNORM=1", "FMT=rg8_snorm"]),
+    "bc7": ("bc7.comp", []),
 }
 
 def compile_one(src, defines):
     with tempfile.NamedTemporaryFile(suffix=".spv", delete=False) as t:
         out = t.name
     cmd = ["glslc", "--target-env=vulkan1.1", "-O", "-fshader-stage=compute"]
-    cmd += ["-D" + d for d in defines] + [os.path.join(SRC, src), "-o", out]
+    cmd += ["-I" + SRC] + ["-D" + d for d in defines] + [os.path.join(SRC, src), "-o", out]
     subprocess.run(cmd, check=True)
     data = open(out, "rb").read()
     os.unlink(out)

@@ -41,7 +41,9 @@ bool bc_decode_implemented(VkFormat bc) {
         case VK_FORMAT_BC4_UNORM_BLOCK:
         case VK_FORMAT_BC4_SNORM_BLOCK:
         case VK_FORMAT_BC5_UNORM_BLOCK:
-        case VK_FORMAT_BC5_SNORM_BLOCK: return true;
+        case VK_FORMAT_BC5_SNORM_BLOCK:
+        case VK_FORMAT_BC7_UNORM_BLOCK:
+        case VK_FORMAT_BC7_SRGB_BLOCK: return true;
         default: return false;
     }
 }
