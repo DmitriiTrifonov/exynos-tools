@@ -41,6 +41,13 @@ Termux's `libc++_shared.so` and does not work inside another app.
    get `[exynos-tools]` lines in the guest's stderr/log: they show whether the layer loaded and
    whether emulation is on ("BC emulation active (mask 0xff)").
 
+What the log tells you: `BC emulation active (mask 0xff)` = emulation is on; `first emulated upload of
+BC format N` = a game really uploaded such a texture; `BC emulation summary` at exit = uploads and
+MiB per format. Format numbers (VkFormat): 131-138 BC1-BC3 (native on Xclipse, never counted),
+139/140 BC4 UNORM/SNORM, 141/142 BC5, 143/144 BC6H UFLOAT/SFLOAT, 145/146 BC7 UNORM/SRGB. A game that
+only uses BC1/BC3 (typical for older Unity 2D titles) will show no uploads: it does not exercise the
+emulation.
+
 ### Things that can go wrong (not tested yet)
 - The Wrapper ICD between the layer and the Samsung driver may hide `VK_KHR_push_descriptor` or
   extended storage formats. The layer then stays off and says so ("device lacks push descriptors").

@@ -3,6 +3,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -101,6 +102,10 @@ struct DeviceData {
     VkDeviceSize min_storage_alignment = 4;
     VkDeviceSize max_storage_range = 0xffffffffu;
     VkPhysicalDeviceMemoryProperties memory_properties{};
+
+    // Emulated uploads per BC format (index format - VK_FORMAT_BC4_UNORM_BLOCK), for the log.
+    std::atomic<uint64_t> upload_count[8] = {};
+    std::atomic<uint64_t> upload_bytes[8] = {};
 
     std::mutex mutex;
     std::unordered_map<uint64_t, std::unique_ptr<EmuImage>> images;

@@ -210,6 +210,11 @@ void bc_device_created(DeviceData* d) {
 }
 
 void bc_device_destroying(DeviceData* d) {
+    for (uint32_t i = 0; i < 8; i++)
+        if (d->upload_count[i])
+            logf("BC emulation summary: format %d: %llu uploads, %llu MiB of BC data", static_cast<int>(kFirstBc + i),
+                 static_cast<unsigned long long>(d->upload_count[i].load()),
+                 static_cast<unsigned long long>(d->upload_bytes[i].load() >> 20));
     std::lock_guard<std::mutex> lock(d->mutex);
     for (auto& kv : d->images)
         for (auto& v : kv.second->storage_views) d->DestroyImageView(d->device, v.second, nullptr);
@@ -417,6 +422,24 @@ void record_decode(DeviceData* d, VkCommandBuffer cb, VkBuffer buffer, VkImage i
         jobs.push_back(j);
     }
     if (jobs.empty()) return;
+
+    {
+        const uint32_t fi = e->bc_format - kFirstBc;
+        VkDeviceSize bytes = 0;
+        for (const Job& j : jobs)
+            bytes += static_cast<VkDeviceSize>(div_up(j.r.extent.width, 4)) * div_up(j.r.extent.height, 4) *
+                     j.r.sub.layerCount * var.block_bytes;
+        const uint64_t before = d->upload_count[fi].fetch_add(jobs.size());
+        d->upload_bytes[fi].fetch_add(bytes);
+        if (before == 0)
+            logf("first emulated upload of BC format %d (%ux%u texels, %u bytes of BC data)",
+                 static_cast<int>(e->bc_format), jobs[0].r.extent.width, jobs[0].r.extent.height,
+                 static_cast<unsigned>(bytes));
+        else if ((before + jobs.size()) / 500 != before / 500)
+            logf("emulated uploads of BC format %d so far: %llu (%llu MiB)", static_cast<int>(e->bc_format),
+                 static_cast<unsigned long long>(before + jobs.size()),
+                 static_cast<unsigned long long>(d->upload_bytes[fi].load() >> 20));
+    }
 
     std::vector<VkImageMemoryBarrier> to_general, back;
     for (const Job& j : jobs) {
