@@ -60,3 +60,19 @@ One UI version and build number: not recorded yet.
   report 4294967295 (unbounded); subgroup size 64 (min 32, max 64 with size control).
 - Memory: 2 heaps, 8 GiB device-local (budget ~7.6 GiB) and 64 MiB device-local; 16 memory types.
 - extendedDynamicState2LogicOp = false.
+
+## Format support measured with vk_probe (Flip 7, 2026-10-14)
+Source: `vk_probe` (CI Android build), run in Termux, using the system Vulkan loader.
+Columns: optimalTilingFeatures / linearTilingFeatures / bufferFeatures.
+
+- BC1 (RGB/RGBA, UNORM/SRGB), BC2, BC3 (UNORM/SRGB): **supported natively**,
+  optimal 0xd401 (sampled, filter-linear, blit-src, transfer-src/dst), linear 0xc401.
+- BC4 (UNORM/SNORM), BC5 (UNORM/SNORM), BC6H (UFLOAT/SFLOAT), BC7 (UNORM/SRGB):
+  **all zero, not supported**. So `textureCompressionBC=false` because only BC1-3 are present.
+- features: textureCompressionBC=0, ETC2=1, ASTC_LDR=1, shaderFloat64=0
+- Depth: D16_UNORM 0xce01, D32_SFLOAT 0xce01, D32_SFLOAT_S8_UINT 0xc601 (no blit-dst);
+  **D24_UNORM_S8_UINT and X8_D24_UNORM_PACK32 are absent (0)**. D3D11 D24S8 must fall back.
+- B8G8R8A8/R8G8B8A8 UNORM 0xdd83 (buffer 0x58), SRGB 0xdd81; A2B10G10R10_UNORM 0xdd83;
+  R16G16B16A16_SFLOAT 0xdd83; R16G16B16A16_UNORM 0xcd83 (one bit fewer than SFLOAT).
+- With and without our layer the app-visible output was identical, but see the open
+  question: it is not proven that the layer was loaded (empty VK_LOADER_DEBUG output).

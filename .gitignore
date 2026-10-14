@@ -3,3 +3,4 @@ build/
 *.o
 *.so
 compile_commands.json
+dist/
