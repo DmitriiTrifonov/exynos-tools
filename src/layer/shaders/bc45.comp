@@ -1,0 +1,82 @@
+#version 450
+// BC4 / BC5 block decoder. One invocation decodes one 4x4 block of one array layer.
+// Compile variants with:  -DBLOCK_WORDS=2|4  -DCHANNELS=1|2  -DSNORM=0|1  -DFMT=r8|rg8|r8_snorm|rg8_snorm
+// Written from the BC4/BC5 definition (two 8-bit endpoints + 16 x 3-bit indices per channel).
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer Blocks { uint data[]; };
+layout(set = 0, binding = 1, FMT) uniform writeonly image2DArray dst;
+
+layout(push_constant) uniform PC {
+    uint word_base;   // index into data[] of block (0,0) of layer 0
+    uint row_pitch;   // blocks per buffer row
+    uint slice_pitch; // blocks per buffer slice (layer)
+    uint off_x, off_y; // region offset in texels
+    uint ext_x, ext_y; // region extent in texels
+    uint mip_x, mip_y; // size of the destination mip level in texels
+} pc;
+
+// Decode one channel (2 words = 64 bits) for texel t (0..15, row major).
+float decode_channel(uint w0, uint w1, uint t) {
+    uint bitpos = 16u + 3u * t;
+    uint sh = bitpos & 31u;
+    uint v;
+    if (bitpos < 32u) {
+        v = w0 >> sh;
+        if (sh > 29u) v |= w1 << (32u - sh);
+    } else {
+        v = w1 >> sh;
+    }
+    uint idx = v & 7u;
+
+#if SNORM
+    float e0 = float(max(int(w0 << 24u) >> 24, -127));
+    float e1 = float(max(int((w0 << 16u) & 0xff000000u) >> 24, -127));
+    float lo = -127.0, hi = 127.0, scale = 127.0;
+#else
+    float e0 = float(w0 & 255u);
+    float e1 = float((w0 >> 8u) & 255u);
+    float lo = 0.0, hi = 255.0, scale = 255.0;
+#endif
+
+    float fi = float(idx);
+    float r;
+    if (idx == 0u) {
+        r = e0;
+    } else if (idx == 1u) {
+        r = e1;
+    } else if (e0 > e1) {
+        r = ((8.0 - fi) * e0 + (fi - 1.0) * e1) / 7.0;
+    } else if (idx < 6u) {
+        r = ((6.0 - fi) * e0 + (fi - 1.0) * e1) / 5.0;
+    } else {
+        r = (idx == 6u) ? lo : hi;
+    }
+    return r / scale;
+}
+
+void main() {
+    uvec3 g = gl_GlobalInvocationID;
+    uvec2 blocks = (uvec2(pc.ext_x, pc.ext_y) + 3u) / 4u;
+    if (g.x >= blocks.x || g.y >= blocks.y) return;
+
+    uint base = pc.word_base + (g.z * pc.slice_pitch + g.y * pc.row_pitch + g.x) * uint(BLOCK_WORDS);
+    uint a0 = data[base], a1 = data[base + 1u];
+#if CHANNELS == 2
+    uint b0 = data[base + 2u], b1 = data[base + 3u];
+#endif
+
+    for (uint t = 0u; t < 16u; t++) {
+        uint px = pc.off_x + g.x * 4u + (t & 3u);
+        uint py = pc.off_y + g.y * 4u + (t >> 2u);
+        if (px >= pc.off_x + pc.ext_x || py >= pc.off_y + pc.ext_y || px >= pc.mip_x || py >= pc.mip_y) continue;
+        float r = decode_channel(a0, a1, t);
+#if CHANNELS == 2
+        float gch = decode_channel(b0, b1, t);
+        imageStore(dst, ivec3(int(px), int(py), int(g.z)), vec4(r, gch, 0.0, 1.0));
+#else
+        imageStore(dst, ivec3(int(px), int(py), int(g.z)), vec4(r, 0.0, 0.0, 1.0));
+#endif
+    }
+}

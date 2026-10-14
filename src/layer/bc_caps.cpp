@@ -11,6 +11,8 @@ BcMode bc_mode() {
         if (!v) return BcMode::Off;
         if (std::strcmp(v, "advertise") == 0) return BcMode::Advertise;
         if (std::strcmp(v, "advertise-force") == 0) return BcMode::AdvertiseForce;
+        if (std::strcmp(v, "emulate") == 0) return BcMode::Emulate;
+        if (std::strcmp(v, "emulate-force") == 0) return BcMode::EmulateForce;
         return BcMode::Off;
     }();
     return mode;
@@ -27,6 +29,20 @@ VkFormat bc_substitute(VkFormat bc) {
         case VK_FORMAT_BC7_UNORM_BLOCK: return VK_FORMAT_R8G8B8A8_UNORM;
         case VK_FORMAT_BC7_SRGB_BLOCK: return VK_FORMAT_R8G8B8A8_SRGB;
         default: return VK_FORMAT_UNDEFINED;
+    }
+}
+
+VkFormat bc_storage_format(VkFormat bc) {
+    return bc == VK_FORMAT_BC7_SRGB_BLOCK ? VK_FORMAT_R8G8B8A8_UNORM : bc_substitute(bc);
+}
+
+bool bc_decode_implemented(VkFormat bc) {
+    switch (bc) {
+        case VK_FORMAT_BC4_UNORM_BLOCK:
+        case VK_FORMAT_BC4_SNORM_BLOCK:
+        case VK_FORMAT_BC5_UNORM_BLOCK:
+        case VK_FORMAT_BC5_SNORM_BLOCK: return true;
+        default: return false;
     }
 }
 

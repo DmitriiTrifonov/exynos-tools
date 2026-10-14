@@ -13,3 +13,5 @@
 | libadrenotools README (bylaws) | custom driver loading, BSD-2-Clause | README only |
 | source.android.com "Implement Vulkan" | Android layer discovery rules | public docs |
 | GameNative release notes / READMEs | which stack GameNative builds on | README level |
+| bcdec (iOrange), third_party/bcdec/bcdec.h | CPU reference decoder for tests only; MIT or Unlicense (dual) | vendored, license text kept in the file |
+| Khronos Data Format Specification / Vulkan spec, BC4/BC5 sections | decode shader (src/layer/shaders/bc45.comp) | public spec |

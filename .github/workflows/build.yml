@@ -28,6 +28,8 @@ jobs:
           scripts/run-probe.sh build | tee probe.log
           grep -q IDENTICAL probe.log
           scripts/check-advertise.sh build advertise-force
+          EXYNOS_TOOLS_BC=emulate-force EXYNOS_TOOLS_LOG=0 EXYNOS_PROBE_LAYER=$PWD/build/libVkLayer_exynos_tools.so \
+            build/bc_upload_test
 
   android:
     runs-on: ubuntu-24.04
@@ -52,4 +54,5 @@ jobs:
           path: |
             build-android/libVkLayer_exynos_tools.so
             build-android/vk_probe
+            build-android/bc_upload_test
             build-android/VkLayer_exynos_tools.json

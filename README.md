@@ -5,10 +5,17 @@ what the driver lacks (starting with BCn texture compression), so that Windows-g
 translation stacks (DXVK, vkd3d-proton under Winlator/GameNative-style launchers) can run
 on Exynos devices. First target: Galaxy Z Flip 7 (Exynos 2500, Xclipse 950).
 
-Status: phase 4 (honest BC capability reporting). By default the layer is a pure pass-through.
-With `EXYNOS_TOOLS_BC=advertise` it reports BC4/BC5/BC6H/BC7 (and `textureCompressionBC`) as
-supported where the driver lacks them, but creating such images still fails with
-`VK_ERROR_FORMAT_NOT_SUPPORTED` until phase 5 adds the actual decoding. See [docs/ROADMAP.md](docs/ROADMAP.md).
+Status: phase 5 in progress. By default the layer is a pure pass-through. `EXYNOS_TOOLS_BC` selects:
+
+- `off` (default): nothing changes.
+- `advertise` / `advertise-force`: only report BC4/BC5/BC6H/BC7 (and `textureCompressionBC`) as
+  supported; for testing the reporting.
+- `emulate`: really emulate. BC4 and BC5 (UNORM/SNORM) work: images are backed by R8/R8G8 images and
+  decoded by a compute shader when data is uploaded with `vkCmdCopyBufferToImage`. BC7 and BC6H are
+  not implemented yet, so `textureCompressionBC` stays false until they are.
+- `emulate-force`: like `emulate` but pretends the driver has none of BC4-BC7 (host testing).
+
+Emulated BC images support sampling and upload only (no readback, copies out of them or storage use). See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Build and try
 
@@ -25,6 +32,11 @@ and diffs what the application sees. The layer logs to stderr (logcat on Android
 
 `scripts/check-advertise.sh build advertise` asserts that the advertised capabilities are
 consistent (use `advertise-force` on drivers that already have BC).
+
+`build/bc_upload_test` uploads random BC4/BC5 data through the layer and compares the decoded
+result with a reference decoder:
+
+    EXYNOS_TOOLS_BC=emulate EXYNOS_PROBE_LAYER=$PWD/build/libVkLayer_exynos_tools.so build/bc_upload_test
 
 Android arm64 builds come from CI (`.github/workflows/build.yml`, NDK). `vk_probe` is also
 a handy replacement for `vulkaninfo --show-formats`: it prints the BC and D3D-relevant
