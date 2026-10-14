@@ -15,7 +15,7 @@ if(EXYNOS_VULKAN_HEADERS_PATH)
   include_directories(BEFORE ${EXYNOS_VULKAN_HEADERS_PATH})
 endif()
 
-add_library(VkLayer_exynos_tools SHARED src/layer/layer.cpp)
+add_library(VkLayer_exynos_tools SHARED src/layer/layer.cpp src/layer/bc_caps.cpp)
 target_compile_options(VkLayer_exynos_tools PRIVATE -Wall -Wextra)
 if(ANDROID)
   target_link_libraries(VkLayer_exynos_tools PRIVATE log)

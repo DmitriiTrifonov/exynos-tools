@@ -142,6 +142,10 @@ int main(void) {
     PFN_vkGetPhysicalDeviceFeatures2 GetFeat2 = INST(instance, vkGetPhysicalDeviceFeatures2);
     PFN_vkEnumerateDeviceExtensionProperties EnumDevExt = INST(instance, vkEnumerateDeviceExtensionProperties);
     PFN_vkGetPhysicalDeviceFormatProperties GetFmt = INST(instance, vkGetPhysicalDeviceFormatProperties);
+    PFN_vkGetPhysicalDeviceImageFormatProperties GetImgFmt = INST(instance, vkGetPhysicalDeviceImageFormatProperties);
+    PFN_vkGetPhysicalDeviceImageFormatProperties2 GetImgFmt2 =
+        INST(instance, vkGetPhysicalDeviceImageFormatProperties2);
+    PFN_vkGetPhysicalDeviceFormatProperties2 GetFmt2 = INST(instance, vkGetPhysicalDeviceFormatProperties2);
     PFN_vkCreateDevice CreateDevice = INST(instance, vkCreateDevice);
     PFN_vkDestroyInstance DestroyInstance = INST(instance, vkDestroyInstance);
 
@@ -183,6 +187,37 @@ int main(void) {
                    fp.linearTilingFeatures, fp.bufferFeatures);
         }
 
+        printf("  bc image-format queries (2D optimal SAMPLED|TRANSFER_DST), FormatProperties2 vs 1:\n");
+        for (size_t k = 0; k < 16; k++) {
+            VkImageFormatProperties ifp = {0};
+            VkResult r = GetImgFmt(pd, kFormats[k].format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+                                   VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &ifp);
+            int r2 = 99;
+            if (GetImgFmt2) {
+                VkPhysicalDeviceImageFormatInfo2 info = {
+                    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+                    .format = kFormats[k].format,
+                    .type = VK_IMAGE_TYPE_2D,
+                    .tiling = VK_IMAGE_TILING_OPTIMAL,
+                    .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT};
+                VkImageFormatProperties2 out = {.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2};
+                r2 = (int)GetImgFmt2(pd, &info, &out);
+            }
+            int fp2same = -1;
+            if (GetFmt2) {
+                VkFormatProperties a, b;
+                VkFormatProperties2 fp2 = {.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2};
+                GetFmt(pd, kFormats[k].format, &a);
+                GetFmt2(pd, kFormats[k].format, &fp2);
+                b = fp2.formatProperties;
+                fp2same = a.optimalTilingFeatures == b.optimalTilingFeatures &&
+                          a.linearTilingFeatures == b.linearTilingFeatures &&
+                          a.bufferFeatures == b.bufferFeatures;
+            }
+            printf("    %-28s query=%d query2=%d maxExtent=%u fp2same=%d\n", kFormats[k].name, (int)r, r2,
+                   r == VK_SUCCESS ? ifp.maxExtent.width : 0, fp2same);
+        }
+
         float prio = 1.0f;
         VkDeviceQueueCreateInfo qci = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                                        .queueFamilyIndex = 0,
@@ -207,6 +242,26 @@ int main(void) {
         PFN_vkGetDeviceQueue GetQueue = DEV(dev, vkGetDeviceQueue);
         PFN_vkDeviceWaitIdle WaitIdle = DEV(dev, vkDeviceWaitIdle);
         PFN_vkDestroyDevice DestroyDevice = DEV(dev, vkDestroyDevice);
+        PFN_vkCreateImage CreateImage = DEV(dev, vkCreateImage);
+        PFN_vkDestroyImage DestroyImage = DEV(dev, vkDestroyImage);
+        printf("  create 64x64 BC images:\n");
+        for (size_t k = 0; k < 16; k++) {
+            VkImageCreateInfo imci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                                      .imageType = VK_IMAGE_TYPE_2D,
+                                      .format = kFormats[k].format,
+                                      .extent = {64, 64, 1},
+                                      .mipLevels = 1,
+                                      .arrayLayers = 1,
+                                      .samples = VK_SAMPLE_COUNT_1_BIT,
+                                      .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                      .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                                      .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+            VkImage img = VK_NULL_HANDLE;
+            VkResult cr = CreateImage(dev, &imci, NULL, &img);
+            printf("    %-28s result=%d\n", kFormats[k].name, (int)cr);
+            if (cr == VK_SUCCESS) DestroyImage(dev, img, NULL);
+        }
         VkQueue q;
         GetQueue(dev, 0, 0, &q);
         CHECK(WaitIdle(dev));

@@ -1,11 +1,15 @@
-// exynos-tools: Vulkan layer, phase 3 (pass-through with logging).
+// exynos-tools: Vulkan layer, phase 4 (pass-through plus BC capability reporting).
 //
 // Written from the Vulkan specification and the Khronos loader/layer interface
 // documentation (loader interface version 2). It forwards everything to the next
 // layer/driver and logs a few calls that matter for the BCn work in later phases.
+// With EXYNOS_TOOLS_BC=advertise it also reports BC4-BC7 as supported where the driver lacks
+// them (see bc_caps.h). Creating such images is not implemented yet and fails honestly.
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
+
+#include "bc_caps.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -23,7 +27,7 @@
 namespace {
 
 constexpr const char* kLayerName = "VK_LAYER_EXYNOS_TOOLS_xclipse";
-constexpr const char* kLayerDesc = "exynos-tools: Xclipse compatibility layer (pass-through)";
+constexpr const char* kLayerDesc = "exynos-tools: Xclipse compatibility layer";
 
 // ---- logging ---------------------------------------------------------------
 
@@ -67,12 +71,17 @@ struct InstanceData {
     PFN_vkGetPhysicalDeviceFeatures GetPhysicalDeviceFeatures = nullptr;
     PFN_vkGetPhysicalDeviceFeatures2 GetPhysicalDeviceFeatures2 = nullptr;
     PFN_vkGetPhysicalDeviceFormatProperties GetPhysicalDeviceFormatProperties = nullptr;
+    PFN_vkGetPhysicalDeviceFormatProperties2 GetPhysicalDeviceFormatProperties2 = nullptr;
+    PFN_vkGetPhysicalDeviceImageFormatProperties GetPhysicalDeviceImageFormatProperties = nullptr;
+    PFN_vkGetPhysicalDeviceImageFormatProperties2 GetPhysicalDeviceImageFormatProperties2 = nullptr;
     PFN_vkEnumerateDeviceExtensionProperties EnumerateDeviceExtensionProperties = nullptr;
 };
 
 struct DeviceData {
     PFN_vkGetDeviceProcAddr gdpa = nullptr;
     PFN_vkDestroyDevice DestroyDevice = nullptr;
+    PFN_vkCreateImage CreateImage = nullptr;
+    uint32_t bc_emulated_mask = 0;  // bit (format - VK_FORMAT_BC4_UNORM_BLOCK) set: format is emulated
 };
 
 std::mutex g_mutex;
@@ -97,6 +106,44 @@ bool get_device(const void* handle, DeviceData* out) {
 
 bool is_bc_format(VkFormat f) {
     return f >= VK_FORMAT_BC1_RGB_UNORM_BLOCK && f <= VK_FORMAT_BC7_SRGB_BLOCK;
+}
+
+// ---- BC emulation policy (phase 4: reporting) ------------------------------
+
+constexpr VkFormat kFirstEmulatedBc = VK_FORMAT_BC4_UNORM_BLOCK;
+constexpr VkFormat kLastEmulatedBc = VK_FORMAT_BC7_SRGB_BLOCK;
+
+bool is_emulatable_bc(VkFormat f) { return f >= kFirstEmulatedBc && f <= kLastEmulatedBc; }
+
+// Decide whether BC format `f` is reported as supported-by-emulation on `pd`. `down` is what the
+// driver itself says. On success `out` holds the properties to report.
+bool emulated_format_props(const InstanceData& d, VkPhysicalDevice pd, VkFormat f,
+                           const VkFormatProperties& down, VkFormatProperties* out) {
+    using exynos::BcMode;
+    const BcMode mode = exynos::bc_mode();
+    if (mode == BcMode::Off || !is_emulatable_bc(f)) return false;
+    if (mode == BcMode::Advertise && down.optimalTilingFeatures != 0) return false;  // native
+    VkFormatProperties sub{};
+    d.GetPhysicalDeviceFormatProperties(pd, exynos::bc_substitute(f), &sub);
+    const VkFormatFeatureFlags feat = exynos::bc_emulated_features(sub.optimalTilingFeatures);
+    if (!feat) return false;
+    out->linearTilingFeatures = 0;
+    out->optimalTilingFeatures = feat;
+    out->bufferFeatures = 0;
+    return true;
+}
+
+// True if every BC format is usable on `pd`, natively or by emulation.
+bool bc_fully_available(const InstanceData& d, VkPhysicalDevice pd) {
+    for (int f = VK_FORMAT_BC1_RGB_UNORM_BLOCK; f <= VK_FORMAT_BC7_SRGB_BLOCK; f++) {
+        VkFormatProperties down{}, emu{};
+        d.GetPhysicalDeviceFormatProperties(pd, static_cast<VkFormat>(f), &down);
+        if (exynos::bc_mode() != exynos::BcMode::AdvertiseForce &&
+            (down.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
+            continue;
+        if (!emulated_format_props(d, pd, static_cast<VkFormat>(f), down, &emu)) return false;
+    }
+    return true;
 }
 
 // ---- intercepted: instance level -------------------------------------------
@@ -142,6 +189,20 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateInstance(const VkInstanceCreateInfo* 
     }
     d.GetPhysicalDeviceFormatProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties>(
         load("vkGetPhysicalDeviceFormatProperties"));
+    d.GetPhysicalDeviceFormatProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties2>(
+        load("vkGetPhysicalDeviceFormatProperties2"));
+    if (!d.GetPhysicalDeviceFormatProperties2) {
+        d.GetPhysicalDeviceFormatProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties2>(
+            load("vkGetPhysicalDeviceFormatProperties2KHR"));
+    }
+    d.GetPhysicalDeviceImageFormatProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceImageFormatProperties>(
+        load("vkGetPhysicalDeviceImageFormatProperties"));
+    d.GetPhysicalDeviceImageFormatProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceImageFormatProperties2>(
+        load("vkGetPhysicalDeviceImageFormatProperties2"));
+    if (!d.GetPhysicalDeviceImageFormatProperties2) {
+        d.GetPhysicalDeviceImageFormatProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceImageFormatProperties2>(
+            load("vkGetPhysicalDeviceImageFormatProperties2KHR"));
+    }
     d.EnumerateDeviceExtensionProperties = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(
         load("vkEnumerateDeviceExtensionProperties"));
 
@@ -184,6 +245,9 @@ VKAPI_ATTR void VKAPI_CALL layer_GetPhysicalDeviceFeatures(VkPhysicalDevice pd,
     InstanceData d;
     if (!get_instance(pd, &d)) return;
     d.GetPhysicalDeviceFeatures(pd, f);
+    if (!f->textureCompressionBC && exynos::bc_mode() != exynos::BcMode::Off && bc_fully_available(d, pd)) {
+        f->textureCompressionBC = VK_TRUE;
+    }
     logf("vkGetPhysicalDeviceFeatures: textureCompressionBC=%u", f->textureCompressionBC);
 }
 
@@ -192,6 +256,10 @@ VKAPI_ATTR void VKAPI_CALL layer_GetPhysicalDeviceFeatures2(VkPhysicalDevice pd,
     InstanceData d;
     if (!get_instance(pd, &d) || !d.GetPhysicalDeviceFeatures2) return;
     d.GetPhysicalDeviceFeatures2(pd, f);
+    if (!f->features.textureCompressionBC && exynos::bc_mode() != exynos::BcMode::Off &&
+        bc_fully_available(d, pd)) {
+        f->features.textureCompressionBC = VK_TRUE;
+    }
     logf("vkGetPhysicalDeviceFeatures2: textureCompressionBC=%u", f->features.textureCompressionBC);
 }
 
@@ -200,11 +268,66 @@ VKAPI_ATTR void VKAPI_CALL layer_GetPhysicalDeviceFormatProperties(VkPhysicalDev
     InstanceData d;
     if (!get_instance(pd, &d)) return;
     d.GetPhysicalDeviceFormatProperties(pd, format, p);
+    VkFormatProperties emu{};
+    if (emulated_format_props(d, pd, format, *p, &emu)) *p = emu;
     if (is_bc_format(format)) {
         logf("vkGetPhysicalDeviceFormatProperties: BC format %d linear=0x%x optimal=0x%x buffer=0x%x",
              static_cast<int>(format), p->linearTilingFeatures, p->optimalTilingFeatures,
              p->bufferFeatures);
     }
+}
+
+VKAPI_ATTR void VKAPI_CALL layer_GetPhysicalDeviceFormatProperties2(VkPhysicalDevice pd, VkFormat format,
+                                                                    VkFormatProperties2* p) {
+    InstanceData d;
+    if (!get_instance(pd, &d) || !d.GetPhysicalDeviceFormatProperties2) return;
+    d.GetPhysicalDeviceFormatProperties2(pd, format, p);
+    VkFormatProperties emu{};
+    if (!emulated_format_props(d, pd, format, p->formatProperties, &emu)) return;
+    p->formatProperties = emu;
+    for (auto* s = static_cast<VkBaseOutStructure*>(p->pNext); s; s = s->pNext) {
+        if (s->sType == VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3) {
+            auto* p3 = reinterpret_cast<VkFormatProperties3*>(s);
+            p3->linearTilingFeatures = emu.linearTilingFeatures;
+            p3->optimalTilingFeatures = emu.optimalTilingFeatures;
+            p3->bufferFeatures = emu.bufferFeatures;
+        }
+    }
+}
+
+// Whether an image-format query for BC format `format` should be answered by emulation.
+bool image_query_emulated(const InstanceData& d, VkPhysicalDevice pd, VkFormat format, VkImageType type,
+                          VkImageTiling tiling, VkImageUsageFlags usage, VkResult down_result) {
+    if (exynos::bc_mode() == exynos::BcMode::Off || !is_emulatable_bc(format)) return false;
+    if (exynos::bc_mode() == exynos::BcMode::Advertise && down_result == VK_SUCCESS) return false;
+    if (type == VK_IMAGE_TYPE_1D || tiling != VK_IMAGE_TILING_OPTIMAL || !exynos::bc_usage_supported(usage))
+        return false;
+    VkFormatProperties none{}, emu{};
+    return emulated_format_props(d, pd, format, none, &emu);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL layer_GetPhysicalDeviceImageFormatProperties(
+    VkPhysicalDevice pd, VkFormat format, VkImageType type, VkImageTiling tiling, VkImageUsageFlags usage,
+    VkImageCreateFlags flags, VkImageFormatProperties* props) {
+    InstanceData d;
+    if (!get_instance(pd, &d)) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult r = d.GetPhysicalDeviceImageFormatProperties(pd, format, type, tiling, usage, flags, props);
+    if (!image_query_emulated(d, pd, format, type, tiling, usage, r)) return r;
+    const VkImageCreateFlags f = flags & ~VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT;
+    return d.GetPhysicalDeviceImageFormatProperties(pd, exynos::bc_substitute(format), type, tiling, usage, f,
+                                                    props);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL layer_GetPhysicalDeviceImageFormatProperties2(
+    VkPhysicalDevice pd, const VkPhysicalDeviceImageFormatInfo2* info, VkImageFormatProperties2* props) {
+    InstanceData d;
+    if (!get_instance(pd, &d) || !d.GetPhysicalDeviceImageFormatProperties2) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult r = d.GetPhysicalDeviceImageFormatProperties2(pd, info, props);
+    if (!image_query_emulated(d, pd, info->format, info->type, info->tiling, info->usage, r)) return r;
+    VkPhysicalDeviceImageFormatInfo2 sub = *info;
+    sub.format = exynos::bc_substitute(info->format);
+    sub.flags &= ~VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT;
+    return d.GetPhysicalDeviceImageFormatProperties2(pd, &sub, props);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(VkPhysicalDevice pd,
@@ -237,11 +360,20 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(VkPhysicalDevice pd,
     DeviceData d;
     d.gdpa = gdpa;
     d.DestroyDevice = reinterpret_cast<PFN_vkDestroyDevice>(gdpa(*pDevice, "vkDestroyDevice"));
+    d.CreateImage = reinterpret_cast<PFN_vkCreateImage>(gdpa(*pDevice, "vkCreateImage"));
+    for (int f = kFirstEmulatedBc; f <= kLastEmulatedBc; f++) {
+        VkFormatProperties down{}, emu{};
+        inst.GetPhysicalDeviceFormatProperties(pd, static_cast<VkFormat>(f), &down);
+        if (emulated_format_props(inst, pd, static_cast<VkFormat>(f), down, &emu)) {
+            d.bc_emulated_mask |= 1u << (f - kFirstEmulatedBc);
+        }
+    }
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_devices[dispatch_key(*pDevice)] = d;
     }
-    logf("vkCreateDevice ok (%u extensions requested)", pCreateInfo->enabledExtensionCount);
+    logf("vkCreateDevice ok (%u extensions requested, BC emulated mask 0x%x)", pCreateInfo->enabledExtensionCount,
+         d.bc_emulated_mask);
     return VK_SUCCESS;
 }
 
@@ -257,6 +389,21 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_EnumerateDeviceExtensionProperties(
 }
 
 // ---- intercepted: device level ---------------------------------------------
+
+// Phase 4: emulated BC formats are advertised but images cannot be created yet. Say so instead of
+// handing the driver a format it rejects (or worse, accepts wrongly).
+VKAPI_ATTR VkResult VKAPI_CALL layer_CreateImage(VkDevice device, const VkImageCreateInfo* pCreateInfo,
+                                                 const VkAllocationCallbacks* pAllocator, VkImage* pImage) {
+    DeviceData d;
+    if (!get_device(device, &d) || !d.CreateImage) return VK_ERROR_INITIALIZATION_FAILED;
+    if (is_emulatable_bc(pCreateInfo->format) &&
+        (d.bc_emulated_mask & (1u << (pCreateInfo->format - kFirstEmulatedBc)))) {
+        logf("vkCreateImage: emulated BC format %d requested, not implemented yet -> FORMAT_NOT_SUPPORTED",
+             static_cast<int>(pCreateInfo->format));
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    return d.CreateImage(device, pCreateInfo, pAllocator, pImage);
+}
 
 VKAPI_ATTR void VKAPI_CALL layer_DestroyDevice(VkDevice device, const VkAllocationCallbacks* pAllocator) {
     if (!device) return;
@@ -277,6 +424,7 @@ VKAPI_ATTR void VKAPI_CALL layer_DestroyDevice(VkDevice device, const VkAllocati
 
 PFN_vkVoidFunction intercepted_device_proc(const char* name) {
     INTERCEPT(DestroyDevice);
+    INTERCEPT(CreateImage);
     return nullptr;
 }
 
@@ -288,7 +436,16 @@ PFN_vkVoidFunction intercepted_instance_proc(const char* name) {
     INTERCEPT(GetPhysicalDeviceFeatures);
     INTERCEPT(GetPhysicalDeviceFeatures2);
     INTERCEPT(GetPhysicalDeviceFormatProperties);
+    INTERCEPT(GetPhysicalDeviceFormatProperties2);
+    INTERCEPT(GetPhysicalDeviceImageFormatProperties);
+    INTERCEPT(GetPhysicalDeviceImageFormatProperties2);
     INTERCEPT(EnumerateDeviceExtensionProperties);
+    if (std::strcmp(name, "vkGetPhysicalDeviceFormatProperties2KHR") == 0) {
+        return reinterpret_cast<PFN_vkVoidFunction>(layer_GetPhysicalDeviceFormatProperties2);
+    }
+    if (std::strcmp(name, "vkGetPhysicalDeviceImageFormatProperties2KHR") == 0) {
+        return reinterpret_cast<PFN_vkVoidFunction>(layer_GetPhysicalDeviceImageFormatProperties2);
+    }
     if (std::strcmp(name, "vkGetPhysicalDeviceFeatures2KHR") == 0) {
         return reinterpret_cast<PFN_vkVoidFunction>(layer_GetPhysicalDeviceFeatures2);
     }

@@ -27,6 +27,7 @@ jobs:
           export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
           scripts/run-probe.sh build | tee probe.log
           grep -q IDENTICAL probe.log
+          scripts/check-advertise.sh build advertise-force
 
   android:
     runs-on: ubuntu-24.04
