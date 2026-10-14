@@ -18,6 +18,10 @@ and from observed behaviour of the hardware, not from other projects' code.
   listed in SOURCES.md with name, version and license.
 - Public bug reports and forum posts about driver behaviour.
 
+## Copyleft code
+- Code under LGPL/GPL (e.g. Vortek, LGPL-2.1; DroidDeck, GPL-3.0) may be read to learn
+  interfaces and protocols, but must not be copied or closely paraphrased into this MIT project.
+
 ## Process
 - Every external source that informed a design decision is listed in `SOURCES.md`.
 - Every device finding goes in `docs/` with the date, device, firmware and how it was obtained.
