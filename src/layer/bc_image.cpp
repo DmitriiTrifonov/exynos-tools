@@ -21,21 +21,22 @@ uint32_t bit_of(VkFormat f) { return 1u << (f - kFirstBc); }
 
 struct Variant {
     int id;                // index into DecodeResources::pipelines
-    uint32_t block_bytes;  // 8 for BC4, 16 for BC5
+    uint32_t block_bytes;  // 8 for BC4, 16 for the others
+    bool per_texel;        // one invocation per texel (BC6H, BC7) instead of per block (BC4, BC5)
 };
 
 // -1 id: no decoder for this format yet.
 Variant variant_of(VkFormat f) {
     switch (f) {
-        case VK_FORMAT_BC4_UNORM_BLOCK: return {0, 8};
-        case VK_FORMAT_BC4_SNORM_BLOCK: return {1, 8};
-        case VK_FORMAT_BC5_UNORM_BLOCK: return {2, 16};
-        case VK_FORMAT_BC5_SNORM_BLOCK: return {3, 16};
+        case VK_FORMAT_BC4_UNORM_BLOCK: return {0, 8, false};
+        case VK_FORMAT_BC4_SNORM_BLOCK: return {1, 8, false};
+        case VK_FORMAT_BC5_UNORM_BLOCK: return {2, 16, false};
+        case VK_FORMAT_BC5_SNORM_BLOCK: return {3, 16, false};
         case VK_FORMAT_BC7_UNORM_BLOCK:
-        case VK_FORMAT_BC7_SRGB_BLOCK: return {4, 16};
-        case VK_FORMAT_BC6H_UFLOAT_BLOCK: return {5, 16};
-        case VK_FORMAT_BC6H_SFLOAT_BLOCK: return {6, 16};
-        default: return {-1, 0};
+        case VK_FORMAT_BC7_SRGB_BLOCK: return {4, 16, true};
+        case VK_FORMAT_BC6H_UFLOAT_BLOCK: return {5, 16, false};
+        case VK_FORMAT_BC6H_SFLOAT_BLOCK: return {6, 16, false};
+        default: return {-1, 0, false};
     }
 }
 
@@ -410,8 +411,9 @@ void record_decode(DeviceData* d, VkCommandBuffer cb, VkBuffer buffer, VkImage i
                 r.extent.height,
                 mip_w,
                 mip_h};
-        j.groups_x = div_up(bx, 8);
-        j.groups_y = div_up(by, 8);
+        // BC4/BC5 decode one block per invocation, BC6H/BC7 one texel.
+        j.groups_x = div_up(var.per_texel ? r.extent.width : bx, 8);
+        j.groups_y = div_up(var.per_texel ? r.extent.height : by, 8);
         jobs.push_back(j);
     }
     if (jobs.empty()) return;

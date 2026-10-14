@@ -1,6 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 // BC6H block decoder (HDR). One invocation decodes one 4x4 block of one array layer into RGBA16F.
+// (Per-texel and shared-memory variants were measured slower on Xclipse: the header parse is the
+// expensive part and wants all lanes busy on different blocks.)
 // Compile with -DSIGNED=0 (BC6H_UFLOAT) or -DSIGNED=1 (BC6H_SFLOAT).
 // Written from the BC6H mode definitions; the header bit-field layouts and the partition table are
 // generated from bcdec (MIT or Unlicense), see scripts/gen-bc-tables.py.
@@ -93,7 +95,14 @@ uint finish_unquantize(int val) {
 
 float half_bits_to_float(uint h) { return unpackHalf2x16(h).x; }
 
-void decode_block(uvec4 block, out vec4 px[16]) {
+void store_texel(uvec3 g, uint t, vec4 v) {
+    uint x = pc.off_x + g.x * 4u + (t & 3u);
+    uint y = pc.off_y + g.y * 4u + (t >> 2u);
+    if (x >= pc.off_x + pc.ext_x || y >= pc.off_y + pc.ext_y || x >= pc.mip_x || y >= pc.mip_y) return;
+    imageStore(dst, ivec3(int(x), int(y), int(g.z)), v);
+}
+
+void decode_block(uvec4 block, uvec3 g) {
     blk = block;
     bpos = 0u;
 
@@ -101,7 +110,7 @@ void decode_block(uvec4 block, out vec4 px[16]) {
     if (code > 1u) code |= rd(3u) << 2u;
     uint mode = code < 2u ? code : BC6H_MODE_OF_CODE[code];
     if (mode == 255u) {  // reserved: all zero, alpha 1
-        for (uint t = 0u; t < 16u; t++) px[t] = vec4(0.0, 0.0, 0.0, 1.0);
+        for (uint t = 0u; t < 16u; t++) store_texel(g, t, vec4(0.0, 0.0, 0.0, 1.0));
         return;
     }
 
@@ -155,7 +164,7 @@ void decode_block(uvec4 block, out vec4 px[16]) {
         vec3 rgb;
         for (uint c = 0u; c < 3u; c++)
             rgb[c] = half_bits_to_float(finish_unquantize(interpolate(ep[c][e], ep[c][e + 1u], w)));
-        px[t] = vec4(rgb, 1.0);
+        store_texel(g, t, vec4(rgb, 1.0));
     }
 }
 
@@ -166,13 +175,5 @@ void main() {
 
     uint base = pc.word_base + (g.z * pc.slice_pitch + g.y * pc.row_pitch + g.x) * 4u;
     uvec4 block = uvec4(data[base], data[base + 1u], data[base + 2u], data[base + 3u]);
-    vec4 px[16];
-    decode_block(block, px);
-
-    for (uint t = 0u; t < 16u; t++) {
-        uint x = pc.off_x + g.x * 4u + (t & 3u);
-        uint y = pc.off_y + g.y * 4u + (t >> 2u);
-        if (x >= pc.off_x + pc.ext_x || y >= pc.off_y + pc.ext_y || x >= pc.mip_x || y >= pc.mip_y) continue;
-        imageStore(dst, ivec3(int(x), int(y), int(g.z)), px[t]);
-    }
+    decode_block(block, g);
 }

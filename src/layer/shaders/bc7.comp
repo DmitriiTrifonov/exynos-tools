@@ -1,8 +1,9 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-// BC7 block decoder. One invocation decodes one 4x4 block of one array layer into RGBA8.
+// BC7 block decoder. One invocation decodes one texel (16 invocations share a block, each reads
+// the block and decodes only its own texel; no per-thread arrays, which keeps register use low).
 // Written from the BC7 (BPTC) mode definitions; the partition tables are generated from bcdec
-// (MIT or Unlicense), see scripts/gen-bc7-tables.py.
+// (MIT or Unlicense), see scripts/gen-bc-tables.py.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -30,15 +31,14 @@ const uint ABITS[8] = uint[8](0u, 0u, 0u, 0u, 6u, 8u, 7u, 5u);
 const uint HAS_PBITS = 0xCBu;  // modes 0, 1, 3, 6, 7
 
 uvec4 blk;
-uint bpos;
 
-uint rd(uint n) {
+// Read n (<= 16) bits at bit position pos of the 128-bit block.
+uint rdat(uint pos, uint n) {
     if (n == 0u) return 0u;
-    uint w = bpos >> 5u;
-    uint o = bpos & 31u;
-    uint v = blk[w] >> o;
-    if (o + n > 32u) v |= blk[w + 1u] << (32u - o);
-    bpos += n;
+    uint w = pos >> 5u;
+    uint o = pos & 31u;
+    uint v = blk[min(w, 3u)] >> o;
+    if (o + n > 32u) v |= blk[min(w + 1u, 3u)] << (32u - o);
     return v & ((1u << n) - 1u);
 }
 
@@ -48,140 +48,126 @@ uint weight(uint bits, uint idx) {
 
 uint interp(uint a, uint b, uint w) { return (a * (64u - w) + b * w + 32u) >> 6u; }
 
-uint nparts;
-uint part;
-
-uint subset_of(uint t) {
+uint subset_of(uint t, uint nparts, uint part) {
     if (nparts == 1u) return 0u;
     if (nparts == 2u) return (BC7_PART2[part] >> t) & 1u;
     return (BC7_PART3[part] >> (2u * t)) & 3u;
 }
 
-bool is_anchor(uint t, uint s) {
-    if (s == 0u) return t == 0u;
-    if (s == 1u) return t == (nparts == 2u ? BC7_ANCHOR2_1[part] : BC7_ANCHOR3_1[part]);
-    return t == BC7_ANCHOR3_2[part];
-}
+uvec4 decode_texel(uint t) {
+    uint m0 = blk.x & 0xffu;
+    if (m0 == 0u) return uvec4(0u);  // reserved mode: transparent black
+    uint mode = uint(findLSB(m0));
+    uint pos = mode + 1u;
 
-void decode_block(uvec4 block, out uvec4 px[16]) {
-    blk = block;
-    bpos = 0u;
-
-    uint mode = 0u;
-    while (mode < 8u) {
-        if (rd(1u) != 0u) break;
-        mode++;
-    }
-    if (mode >= 8u) {
-        for (uint t = 0u; t < 16u; t++) px[t] = uvec4(0u);
-        return;
-    }
-
-    nparts = 1u;
-    part = 0u;
-    uint rot = 0u, idxsel = 0u;
+    uint nparts = 1u, part = 0u, rot = 0u, idxsel = 0u;
     if (mode == 0u || mode == 1u || mode == 2u || mode == 3u || mode == 7u) {
         nparts = (mode == 0u || mode == 2u) ? 3u : 2u;
-        part = rd(mode == 0u ? 4u : 6u);
+        uint pbits = (mode == 0u) ? 4u : 6u;
+        part = rdat(pos, pbits);
+        pos += pbits;
     }
-    uint nep = nparts * 2u;
     if (mode == 4u || mode == 5u) {
-        rot = rd(2u);
-        if (mode == 4u) idxsel = rd(1u);
+        rot = rdat(pos, 2u);
+        pos += 2u;
+        if (mode == 4u) {
+            idxsel = rdat(pos, 1u);
+            pos += 1u;
+        }
     }
 
-    uvec4 ep[6];
-    for (uint j = 0u; j < 6u; j++) ep[j] = uvec4(0u);
-    for (uint c = 0u; c < 3u; c++)
-        for (uint j = 0u; j < nep; j++) ep[j][c] = rd(CBITS[mode]);
-    if (ABITS[mode] > 0u)
-        for (uint j = 0u; j < nep; j++) ep[j][3] = rd(ABITS[mode]);
+    uint nep = nparts * 2u;
+    uint cb = CBITS[mode], ab = ABITS[mode];
+    uint s = subset_of(t, nparts, part);
+    uint e0 = s * 2u, e1 = e0 + 1u;
+    uint pa = pos + 3u * nep * cb;  // alpha endpoints
+    uint pp = pa + nep * ab;        // p-bits
+    bool has_p = ((HAS_PBITS >> mode) & 1u) != 0u;
+    uint istart = pp + (has_p ? (mode == 1u ? 2u : nep) : 0u);  // first index bit
 
-    bool has_pbits = ((HAS_PBITS >> mode) & 1u) != 0u;
-    if (has_pbits) {
-        for (uint j = 0u; j < nep; j++) ep[j] <<= 1u;
+    uvec4 c0 = uvec4(0u), c1 = uvec4(0u);
+    for (uint c = 0u; c < 3u; c++) {
+        c0[c] = rdat(pos + (c * nep + e0) * cb, cb);
+        c1[c] = rdat(pos + (c * nep + e1) * cb, cb);
+    }
+    if (ab > 0u) {
+        c0.a = rdat(pa + e0 * ab, ab);
+        c1.a = rdat(pa + e1 * ab, ab);
+    }
+    uint pq = 0u;
+    if (has_p) {
+        uint p0, p1;
         if (mode == 1u) {
-            uint p0 = rd(1u), p1 = rd(1u);
-            for (uint c = 0u; c < 3u; c++) {
-                ep[0][c] |= p0;
-                ep[1][c] |= p0;
-                ep[2][c] |= p1;
-                ep[3][c] |= p1;
-            }
+            p0 = p1 = rdat(pp + s, 1u);  // one p-bit shared by both endpoints of a subset
         } else {
-            for (uint j = 0u; j < nep; j++) ep[j] |= uvec4(rd(1u));
+            p0 = rdat(pp + e0, 1u);
+            p1 = rdat(pp + e1, 1u);
         }
+        c0 = (c0 << 1u) | uvec4(p0);
+        c1 = (c1 << 1u) | uvec4(p1);
+        pq = 1u;
+    }
+    // expand to 8 bits by replicating the top bits
+    uint cq = cb + pq;
+    for (uint c = 0u; c < 3u; c++) {
+        uint v0 = c0[c] << (8u - cq);
+        c0[c] = v0 | (v0 >> cq);
+        uint v1 = c1[c] << (8u - cq);
+        c1[c] = v1 | (v1 >> cq);
+    }
+    if (ab == 0u) {
+        c0.a = 255u;
+        c1.a = 255u;
+    } else {
+        uint aq = ab + pq;
+        uint v0 = c0.a << (8u - aq);
+        c0.a = v0 | (v0 >> aq);
+        uint v1 = c1.a << (8u - aq);
+        c1.a = v1 | (v1 >> aq);
     }
 
-    uint pb = has_pbits ? 1u : 0u;
-    for (uint j = 0u; j < nep; j++) {
-        uint cb = CBITS[mode] + pb;
-        for (uint c = 0u; c < 3u; c++) {
-            uint v = ep[j][c] << (8u - cb);
-            ep[j][c] = v | (v >> cb);
-        }
-        if (ABITS[mode] == 0u) {
-            ep[j][3] = 255u;
-        } else {
-            uint ab = ABITS[mode] + pb;
-            uint v = ep[j][3] << (8u - ab);
-            ep[j][3] = v | (v >> ab);
-        }
-    }
-
+    // index of this texel: the anchor texel of each subset stores one bit less
     uint ib = (mode < 2u) ? 3u : ((mode == 6u) ? 4u : 2u);
+    uint a1 = nparts == 2u ? BC7_ANCHOR2_1[part] : (nparts == 3u ? BC7_ANCHOR3_1[part] : 16u);
+    uint a2 = nparts == 3u ? BC7_ANCHOR3_2[part] : 16u;
+    bool anchor = (t == 0u) || (t == a1) || (t == a2);
+    uint before = (t > 0u ? 1u : 0u) + (a1 < t ? 1u : 0u) + (a2 < t ? 1u : 0u);
+    uint idx = rdat(istart + t * ib - before, anchor ? ib - 1u : ib);
+
+    uint wc = weight(ib, idx);
+    uint wa = wc;
     uint ib2 = (mode == 4u) ? 3u : ((mode == 5u) ? 2u : 0u);
-
-    uint idx[16];
-    for (uint t = 0u; t < 16u; t++) {
-        uint s = subset_of(t);
-        idx[t] = rd(is_anchor(t, s) ? ib - 1u : ib);
-    }
-    uint idx2[16];
-    for (uint t = 0u; t < 16u; t++) idx2[t] = 0u;
     if (ib2 != 0u) {
-        for (uint t = 0u; t < 16u; t++) idx2[t] = rd(t == 0u ? ib2 - 1u : ib2);
+        // second index set (alpha, or colour when idxsel is set); only texel 0 is an anchor
+        uint i2start = istart + 16u * ib - 1u;
+        uint idx2 = rdat(i2start + t * ib2 - (t > 0u ? 1u : 0u), t == 0u ? ib2 - 1u : ib2);
+        uint w2 = weight(ib2, idx2);
+        if (idxsel == 0u) {
+            wa = w2;
+        } else {
+            wa = wc;
+            wc = w2;
+        }
     }
 
-    for (uint t = 0u; t < 16u; t++) {
-        uint s = subset_of(t);
-        uvec4 e0 = ep[2u * s], e1 = ep[2u * s + 1u];
-        uint wc = weight(ib, idx[t]);
-        uint wa = wc;
-        if (ib2 != 0u) {
-            uint w2 = weight(ib2, idx2[t]);
-            if (idxsel == 0u) {
-                wa = w2;
-            } else {
-                wa = wc;
-                wc = w2;
-            }
-        }
-        uint r = interp(e0.r, e1.r, wc);
-        uint g = interp(e0.g, e1.g, wc);
-        uint b = interp(e0.b, e1.b, wc);
-        uint a = interp(e0.a, e1.a, wa);
-        if (rot == 1u) { uint x = a; a = r; r = x; }
-        else if (rot == 2u) { uint x = a; a = g; g = x; }
-        else if (rot == 3u) { uint x = a; a = b; b = x; }
-        px[t] = uvec4(r, g, b, a);
-    }
+    uint r = interp(c0.r, c1.r, wc);
+    uint g = interp(c0.g, c1.g, wc);
+    uint b = interp(c0.b, c1.b, wc);
+    uint a = interp(c0.a, c1.a, wa);
+    if (rot == 1u) { uint x = a; a = r; r = x; }
+    else if (rot == 2u) { uint x = a; a = g; g = x; }
+    else if (rot == 3u) { uint x = a; a = b; b = x; }
+    return uvec4(r, g, b, a);
 }
 
 void main() {
     uvec3 g = gl_GlobalInvocationID;
-    uvec2 blocks = (uvec2(pc.ext_x, pc.ext_y) + 3u) / 4u;
-    if (g.x >= blocks.x || g.y >= blocks.y) return;
+    if (g.x >= pc.ext_x || g.y >= pc.ext_y) return;
+    uint x = pc.off_x + g.x, y = pc.off_y + g.y;
+    if (x >= pc.mip_x || y >= pc.mip_y) return;
 
-    uint base = pc.word_base + (g.z * pc.slice_pitch + g.y * pc.row_pitch + g.x) * 4u;
-    uvec4 block = uvec4(data[base], data[base + 1u], data[base + 2u], data[base + 3u]);
-    uvec4 px[16];
-    decode_block(block, px);
-
-    for (uint t = 0u; t < 16u; t++) {
-        uint x = pc.off_x + g.x * 4u + (t & 3u);
-        uint y = pc.off_y + g.y * 4u + (t >> 2u);
-        if (x >= pc.off_x + pc.ext_x || y >= pc.off_y + pc.ext_y || x >= pc.mip_x || y >= pc.mip_y) continue;
-        imageStore(dst, ivec3(int(x), int(y), int(g.z)), vec4(px[t]) / 255.0);
-    }
+    uint base = pc.word_base + (g.z * pc.slice_pitch + (g.y >> 2u) * pc.row_pitch + (g.x >> 2u)) * 4u;
+    blk = uvec4(data[base], data[base + 1u], data[base + 2u], data[base + 3u]);
+    uint t = ((g.y & 3u) << 2u) | (g.x & 3u);
+    imageStore(dst, ivec3(int(x), int(y), int(g.z)), vec4(decode_texel(t)) / 255.0);
 }

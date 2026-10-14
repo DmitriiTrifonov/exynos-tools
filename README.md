@@ -39,6 +39,8 @@ result with a reference decoder:
 
     EXYNOS_TOOLS_BC=emulate EXYNOS_PROBE_LAYER=$PWD/build/libVkLayer_exynos_tools.so build/bc_upload_test
 
+`build/bc_bench` measures upload speed (see docs/PERFORMANCE.md for the Flip 7 numbers).
+
 Android arm64 builds come from CI (`.github/workflows/build.yml`, NDK). `vk_probe` is also
 a handy replacement for `vulkaninfo --show-formats`: it prints the BC and D3D-relevant
 format features of the device.

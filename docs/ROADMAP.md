@@ -9,6 +9,6 @@
    - 5a/5b (done, device-tested): image/view/buffer substitution, compute-state restore, BC4/BC5 decode
    - 5c (done, device-tested) BC7: all 8 modes, exact match with bcdec
    - 5d (done, device-tested) BC6H: all 14 modes, bit-exact with bcdec; textureCompressionBC now true in emulate mode
-   - 5e remaining copy forms / 3D / robustness / performance
+   - 5e performance measured and BC7 sped up (docs/PERFORMANCE.md); remaining copy forms / 3D / robustness / performance
 6. Tests: reference decode comparison, test app, dEQP subset, DXVK/vkd3d smoke tests.
 7. Extras: host_image_copy, Vulkan 1.4 reporting, pipeline cache; benchmarks.

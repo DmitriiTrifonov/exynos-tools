@@ -1,0 +1,17 @@
+device: Samsung Xclipse 950, timestamp period 39.06 ns, layer embedded, EXYNOS_TOOLS_BC=emulate
+format         scenario                   GPU ms    MB/s (BC)     Mtexel/s    CPU us/copy
+BC3 (native)   large 4096x4096             0.791        21205        21205           17.2
+BC3 (native)   many 256x256 x256          0.0014        46207        46207            1.6
+BC3 (native)   tiny 64x64 x256            0.0001        46603        46603            3.0
+BC4_UNORM      large 4096x4096             2.131         3936         7872           42.9
+BC4_UNORM      many 256x256 x256          0.0164         1997         3994            5.3
+BC4_UNORM      tiny 64x64 x256            0.0123          167          333            6.3
+BC5_UNORM      large 4096x4096             3.811         4402         4402           46.8
+BC5_UNORM      many 256x256 x256          0.0215         3046         3046           20.6
+BC5_UNORM      tiny 64x64 x256            0.0163          251          251           21.1
+BC6H_UFLOAT    large 4096x4096             7.544         2224         2224          101.9
+BC6H_UFLOAT    many 256x256 x256          0.0729          899          899           20.0
+BC6H_UFLOAT    tiny 64x64 x256            0.0454           90           90           21.6
+BC7_UNORM      large 4096x4096             7.954         2109         2109           97.9
+BC7_UNORM      many 256x256 x256          0.0392         1673         1673           23.6
+BC7_UNORM      tiny 64x64 x256            0.0074          555          555           17.0

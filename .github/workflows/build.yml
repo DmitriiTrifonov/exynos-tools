@@ -55,4 +55,5 @@ jobs:
             build-android/libVkLayer_exynos_tools.so
             build-android/vk_probe
             build-android/bc_upload_test
+            build-android/bc_bench
             build-android/VkLayer_exynos_tools.json
