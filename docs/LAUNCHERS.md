@@ -28,6 +28,10 @@ docs/WRAPPER_MANAGER_PLAN.md, `XServerDisplayActivity.java`, `WrapperManager.jav
 `ENABLE_BCN_COMPUTE=1`). When `EXYNOS_TOOLS_BC` is not set, the layer treats `ENABLE_BCN_COMPUTE=1`
 as `emulate`, so no extra setting is needed.
 
+Build the package from the **NDK/CI build** (`exynos-tools-android-arm64` artifact, contains
+`leegao_bcn.tzst`): it links libc++ statically. A library built with Termux's clang depends on
+Termux's `libc++_shared.so` and does not work inside another app.
+
 ### Try it
 1. Install Bannerlator (APK from its GitHub releases), create a container, choose the graphics
    driver "Wrapper + bcn_layer".

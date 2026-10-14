@@ -21,6 +21,9 @@ if(ANDROID)
   target_link_libraries(VkLayer_exynos_tools PRIVATE log)
   target_link_options(VkLayer_exynos_tools PRIVATE -Wl,--strip-all)  # debug info is not needed on the phone
 endif()
+# NOTE: the layer is loaded into other processes (a launcher's guest). The NDK build links libc++
+# statically (the default ANDROID_STL=c++_static), so use the CI build or an NDK build for packages.
+# A build with Termux's clang needs libc++_shared.so and is only good for tests inside Termux.
 # Android loads layers named lib*.so from the app's lib dir; keep the standard name.
 set_target_properties(VkLayer_exynos_tools PROPERTIES OUTPUT_NAME "VkLayer_exynos_tools")
 
