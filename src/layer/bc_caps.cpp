@@ -1,13 +1,44 @@
 #include "bc_caps.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace exynos {
 
+// Android: a value can also come from /storage/emulated/0/wrapper/exynos.conf (lines KEY=VALUE,
+// '#' starts a comment), so a mode can be switched from outside the launcher's sandbox without
+// editing its settings. The environment variable wins.
+static std::string conf_value(const char* key) {
+#ifdef __ANDROID__
+    std::FILE* f = std::fopen("/storage/emulated/0/wrapper/exynos.conf", "r");
+    if (!f) return {};
+    std::string result;
+    char line[256];
+    const size_t n = std::strlen(key);
+    while (std::fgets(line, sizeof line, f)) {
+        if (std::strncmp(line, key, n) != 0 || line[n] != '=') continue;
+        result = line + n + 1;
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' ')) result.pop_back();
+    }
+    std::fclose(f);
+    return result;
+#else
+    (void)key;
+    return {};
+#endif
+}
+
 BcMode bc_mode() {
     static const BcMode mode = [] {
-        const char* v = std::getenv("EXYNOS_TOOLS_BC");
+        const char* env = std::getenv("EXYNOS_TOOLS_BC");
+        static std::string from_conf;
+        if (!env) {
+            from_conf = conf_value("EXYNOS_TOOLS_BC");
+            if (!from_conf.empty()) env = from_conf.c_str();
+        }
+        const char* v = env;
         if (!v) {
             // Loaded as the "BCn layer" of a Winlator-style launcher (docs/LAUNCHERS.md): the launcher
             // switches that layer on with ENABLE_BCN_COMPUTE=1 and knows nothing about our variables.

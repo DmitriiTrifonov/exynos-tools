@@ -56,6 +56,15 @@ MiB per format. Format numbers (VkFormat): 131-138 BC1-BC3 (native on Xclipse, n
 only uses BC1/BC3 (typical for older Unity 2D titles) will show no uploads: it does not exercise the
 emulation.
 
+### Switching modes without touching the launcher
+On Android the layer also reads `/storage/emulated/0/wrapper/exynos.conf` (lines `KEY=VALUE`), e.g.
+`EXYNOS_TOOLS_BC=emulate-force`. Modes: `off`, `emulate` (fill gaps only: used when the stack below
+reports no BC support), `emulate-force` (ignore what the lower layers claim, substitute the formats
+and decode here). The environment variable, if set, wins.
+
+First result on the Flip 7 in Bannerlator (2026-10-15): the layer loads, and the Wrapper ICD below it
+already reports `textureCompressionBC=1`, so plain `emulate` found nothing to do.
+
 ### Things that can go wrong (not tested yet)
 - The Wrapper ICD between the layer and the Samsung driver may hide `VK_KHR_push_descriptor` or
   extended storage formats. The layer then stays off and says so ("device lacks push descriptors").
