@@ -4,6 +4,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include <string>
+
 namespace exynos {
 
 // EXYNOS_TOOLS_BC selects the behaviour:
@@ -18,6 +20,14 @@ inline bool bc_is_emulate(BcMode m) { return m == BcMode::Emulate || m == BcMode
 inline bool bc_is_force(BcMode m) { return m == BcMode::AdvertiseForce || m == BcMode::EmulateForce; }
 
 BcMode bc_mode();
+
+// Value of a layer setting: the environment variable, else (Android) the line KEY=VALUE of
+// /storage/emulated/0/wrapper/exynos.conf. Empty if unset.
+std::string config_value(const char* key);
+
+// Whether device extension `name` is hidden from the app (EXYNOS_TOOLS_HIDE_EXT, comma-separated
+// short names: present_wait, present_id).
+bool ext_hidden(const char* name);
 
 // Uncompressed format that backs an emulated BC format; VK_FORMAT_UNDEFINED if the format is not
 // emulated (BC1-BC3 are expected to be native and are never emulated).

@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include <unistd.h>
 
@@ -215,6 +216,14 @@ VKAPI_ATTR void VKAPI_CALL layer_GetPhysicalDeviceFeatures2(VkPhysicalDevice pd,
     d->GetPhysicalDeviceFeatures2(pd, f);
     if (!f->features.textureCompressionBC && bc_mode() != BcMode::Off && bc_fully_available(d, pd))
         f->features.textureCompressionBC = VK_TRUE;
+    // Features of extensions the app is not allowed to use are reported as off (DXVK then paces
+    // frames without present_wait; the host driver's implementation of it crashes).
+    for (auto* s = static_cast<VkBaseOutStructure*>(f->pNext); s; s = s->pNext) {
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR && ext_hidden("VK_KHR_present_wait"))
+            reinterpret_cast<VkPhysicalDevicePresentWaitFeaturesKHR*>(s)->presentWait = VK_FALSE;
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR && ext_hidden("VK_KHR_present_id"))
+            reinterpret_cast<VkPhysicalDevicePresentIdFeaturesKHR*>(s)->presentId = VK_FALSE;
+    }
     logf("vkGetPhysicalDeviceFeatures2: textureCompressionBC=%u", f->features.textureCompressionBC);
 }
 
@@ -325,6 +334,20 @@ VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(VkPhysicalDevice pd, const VkD
 
     auto create = reinterpret_cast<PFN_vkCreateDevice>(gipa(inst->instance, "vkCreateDevice"));
     if (!create) return VK_ERROR_INITIALIZATION_FAILED;
+
+    // Extensions hidden by EXYNOS_TOOLS_HIDE_EXT are dropped from the request (the loader does not
+    // let a layer filter the extension list, so the app may have seen them).
+    std::vector<const char*> kept_exts;
+    VkDeviceCreateInfo filtered = *pCreateInfo;
+    for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i)
+        if (!ext_hidden(pCreateInfo->ppEnabledExtensionNames[i])) kept_exts.push_back(pCreateInfo->ppEnabledExtensionNames[i]);
+    if (kept_exts.size() != pCreateInfo->enabledExtensionCount) {
+        logf("vkCreateDevice: hiding %u extension(s) per EXYNOS_TOOLS_HIDE_EXT",
+             pCreateInfo->enabledExtensionCount - static_cast<uint32_t>(kept_exts.size()));
+        filtered.enabledExtensionCount = static_cast<uint32_t>(kept_exts.size());
+        filtered.ppEnabledExtensionNames = kept_exts.data();
+        pCreateInfo = &filtered;
+    }
 
     DeviceCreatePatch patch;
     bc_patch_device_create(inst, pd, pCreateInfo, &patch);

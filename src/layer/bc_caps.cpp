@@ -30,6 +30,17 @@ static std::string conf_value(const char* key) {
 #endif
 }
 
+std::string config_value(const char* key) {
+    if (const char* e = std::getenv(key)) return e;
+    return conf_value(key);
+}
+
+bool ext_hidden(const char* name) {
+    static const std::string list = "," + config_value("EXYNOS_TOOLS_HIDE_EXT") + ",";
+    if (list.size() <= 2 || std::strncmp(name, "VK_KHR_", 7) != 0) return false;
+    return list.find("," + std::string(name + 7) + ",") != std::string::npos;
+}
+
 BcMode bc_mode() {
     static const BcMode mode = [] {
         const char* env = std::getenv("EXYNOS_TOOLS_BC");

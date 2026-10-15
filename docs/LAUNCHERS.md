@@ -72,3 +72,11 @@ already reports `textureCompressionBC=1`, so plain `emulate` found nothing to do
 - Only `vkCmdCopyBufferToImage` (and the `2` forms) can fill an emulated image. Reading such an image
   back, copying one BC image to another, 3D BC textures: not supported yet.
 - The layer is a separate implementation; the stock bcn_layer remains the reference for comparison.
+
+## Hiding broken extensions (EXYNOS_TOOLS_HIDE_EXT)
+
+`EXYNOS_TOOLS_HIDE_EXT=present_wait,present_id` (env or `wrapper/exynos.conf`) reports the
+features of `VK_KHR_present_wait` / `VK_KHR_present_id` as off and drops those extensions from
+`vkCreateDevice`. Any `VK_KHR_<name>` can be listed. Reason: on the Flip 7 under Bannerlator's
+Wrapper, `vkWaitForPresentKHR` crashed (0xc0000005 in the Unix call) right after DXVK 2.6.2 created
+its swapchain, giving a black screen; without present_wait DXVK paces frames itself.
