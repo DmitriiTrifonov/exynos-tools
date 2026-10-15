@@ -17,6 +17,7 @@ Status: phase 5 (BCn emulation) works for all BC formats; hardening and performa
 - `emulate-force`: like `emulate` but pretends the driver has none of BC4-BC7 (host testing).
 
 Emulated BC images support sampling and upload only (no readback, copies out of them or storage use). See [docs/ROADMAP.md](docs/ROADMAP.md).
+See [docs/FLIP7-BANNERLATOR.md](docs/FLIP7-BANNERLATOR.md) for the setup that works on the Galaxy Z Flip 7 in Bannerlator (DXVK version, config, tested games).
 
 ## Build and try
 
