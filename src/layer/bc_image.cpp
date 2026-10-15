@@ -435,7 +435,8 @@ void record_decode(DeviceData* d, VkCommandBuffer cb, VkBuffer buffer, VkImage i
             logf("first emulated upload of BC format %d (%ux%u texels, %u bytes of BC data)",
                  static_cast<int>(e->bc_format), jobs[0].r.extent.width, jobs[0].r.extent.height,
                  static_cast<unsigned>(bytes));
-        else if ((before + jobs.size()) / 500 != before / 500)
+        else if ((before + jobs.size()) / 500 != before / 500 ||
+                 (before + jobs.size() >= 8 && __builtin_clzll(before) != __builtin_clzll(before + jobs.size())))
             logf("emulated uploads of BC format %d so far: %llu (%llu MiB)", static_cast<int>(e->bc_format),
                  static_cast<unsigned long long>(before + jobs.size()),
                  static_cast<unsigned long long>(d->upload_bytes[fi].load() >> 20));
