@@ -74,7 +74,16 @@ void logf(const char* fmt, ...) {
     // (Termux) can read it when the game runs inside a launcher's sandbox.
     static std::FILE* file = [] {
         const char* path = std::getenv("EXYNOS_TOOLS_LOG_FILE");
-        return path && path[0] ? std::fopen(path, "a") : nullptr;
+        if (path && path[0]) return std::fopen(path, "a");
+#ifdef __ANDROID__
+        // No setting needed on a phone: if the Winlator-style wrapper has created its log folder in
+        // shared storage, write next to its logs (EXYNOS_TOOLS_LOG_FILE= with an empty value opts out).
+        if (!path) {
+            static const char kDir[] = "/storage/emulated/0/wrapper/logs";
+            if (access(kDir, W_OK) == 0) return std::fopen("/storage/emulated/0/wrapper/logs/exynos.log", "a");
+        }
+#endif
+        return static_cast<std::FILE*>(nullptr);
     }();
     if (file) {
         va_start(ap, fmt);

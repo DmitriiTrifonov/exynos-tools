@@ -41,7 +41,9 @@ Termux's `libc++_shared.so` and does not work inside another app.
    get `[exynos-tools]` lines in the guest's stderr/log: they show whether the layer loaded and
    whether emulation is on ("BC emulation active (mask 0xff)").
 
-Getting the log out of the launcher's sandbox: set `EXYNOS_TOOLS_LOG_FILE` in the container's
+Getting the log out of the launcher's sandbox: on Android the layer writes
+`/storage/emulated/0/wrapper/logs/exynos.log` by itself when that folder exists and is writable
+(nothing to configure). To use another file, set `EXYNOS_TOOLS_LOG_FILE` in the container's
 environment variables to a file in shared storage, for example
 `/storage/emulated/0/wrapper/logs/exynos.log` (Bannerlator's wrapper creates `wrapper/logs`
 there; Termux can read it after `termux-setup-storage`). If the launcher's guest cannot write
