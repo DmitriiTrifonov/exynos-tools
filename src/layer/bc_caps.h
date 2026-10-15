@@ -26,7 +26,8 @@ BcMode bc_mode();
 std::string config_value(const char* key);
 
 // Whether device extension `name` is hidden from the app (EXYNOS_TOOLS_HIDE_EXT, comma-separated
-// short names: present_wait, present_id).
+// names: VK_KHR_ ones by short name (present_wait, present_id), others by full name
+// (VK_EXT_graphics_pipeline_library). Their features are reported as off.
 bool ext_hidden(const char* name);
 
 // Uncompressed format that backs an emulated BC format; VK_FORMAT_UNDEFINED if the format is not

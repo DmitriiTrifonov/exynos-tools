@@ -223,6 +223,9 @@ VKAPI_ATTR void VKAPI_CALL layer_GetPhysicalDeviceFeatures2(VkPhysicalDevice pd,
             reinterpret_cast<VkPhysicalDevicePresentWaitFeaturesKHR*>(s)->presentWait = VK_FALSE;
         if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR && ext_hidden("VK_KHR_present_id"))
             reinterpret_cast<VkPhysicalDevicePresentIdFeaturesKHR*>(s)->presentId = VK_FALSE;
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT &&
+            ext_hidden("VK_EXT_graphics_pipeline_library"))
+            reinterpret_cast<VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT*>(s)->graphicsPipelineLibrary = VK_FALSE;
     }
     logf("vkGetPhysicalDeviceFeatures2: textureCompressionBC=%u", f->features.textureCompressionBC);
 }

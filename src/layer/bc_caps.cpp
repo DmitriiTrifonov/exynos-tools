@@ -37,8 +37,10 @@ std::string config_value(const char* key) {
 
 bool ext_hidden(const char* name) {
     static const std::string list = "," + config_value("EXYNOS_TOOLS_HIDE_EXT") + ",";
-    if (list.size() <= 2 || std::strncmp(name, "VK_KHR_", 7) != 0) return false;
-    return list.find("," + std::string(name + 7) + ",") != std::string::npos;
+    if (list.size() <= 2) return false;
+    // Listed either by full name, or by short name for VK_KHR_ extensions.
+    if (list.find("," + std::string(name) + ",") != std::string::npos) return true;
+    return std::strncmp(name, "VK_KHR_", 7) == 0 && list.find("," + std::string(name + 7) + ",") != std::string::npos;
 }
 
 BcMode bc_mode() {
