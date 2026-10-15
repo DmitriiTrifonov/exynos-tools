@@ -41,6 +41,12 @@ Termux's `libc++_shared.so` and does not work inside another app.
    get `[exynos-tools]` lines in the guest's stderr/log: they show whether the layer loaded and
    whether emulation is on ("BC emulation active (mask 0xff)").
 
+Getting the log out of the launcher's sandbox: set `EXYNOS_TOOLS_LOG_FILE` in the container's
+environment variables to a file in shared storage, for example
+`/storage/emulated/0/wrapper/logs/exynos.log` (Bannerlator's wrapper creates `wrapper/logs`
+there; Termux can read it after `termux-setup-storage`). If the launcher's guest cannot write
+there, the layer simply logs nowhere else; stderr/logcat still work.
+
 What the log tells you: `BC emulation active (mask 0xff)` = emulation is on; `first emulated upload of
 BC format N` = a game really uploaded such a texture; `BC emulation summary` at exit = uploads and
 MiB per format. Format numbers (VkFormat): 131-138 BC1-BC3 (native on Xclipse, never counted),

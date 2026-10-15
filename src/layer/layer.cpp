@@ -16,6 +16,8 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <unistd.h>
+
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
@@ -68,6 +70,20 @@ void logf(const char* fmt, ...) {
     std::vfprintf(stderr, fmt, ap);
     std::fprintf(stderr, "\n");
     va_end(ap);
+    // EXYNOS_TOOLS_LOG_FILE=<path>: also append to a file, e.g. in shared storage where another app
+    // (Termux) can read it when the game runs inside a launcher's sandbox.
+    static std::FILE* file = [] {
+        const char* path = std::getenv("EXYNOS_TOOLS_LOG_FILE");
+        return path && path[0] ? std::fopen(path, "a") : nullptr;
+    }();
+    if (file) {
+        va_start(ap, fmt);
+        std::fprintf(file, "[exynos-tools pid %d] ", static_cast<int>(getpid()));
+        std::vfprintf(file, fmt, ap);
+        std::fprintf(file, "\n");
+        std::fflush(file);
+        va_end(ap);
+    }
 }
 
 InstanceData* find_instance(const void* handle) {
